@@ -8,16 +8,44 @@ import {
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell } from 'recharts';
 import { useData } from '../../contexts/DataContext';
+import { AttendanceAPI } from '../../lib/api';
 import { MOCK_ANNOUNCEMENTS } from '../../data/mockData';
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
   const { employees, leaveRequests, tasks, allAttendance, allAttendanceLoading, fetchAllAttendance, quickActions } = useData();
+  const [presentTodayLocal, setPresentTodayLocal] = React.useState(null);
   
-  // Load today's attendance for admin/hr dashboard counts
+  // Load current week's attendance (Mon-Fri) for charts and stats
   useEffect(() => {
-    const today = new Date().toISOString().slice(0, 10);
-    fetchAllAttendance({ from: today, to: today });
+    const now = new Date();
+    const day = now.getDay(); // 0-6, Sun=0
+    const monday = new Date(now);
+    const diffToMon = (day === 0 ? -6 : 1 - day); // if Sun, go back 6 days
+    monday.setDate(now.getDate() + diffToMon);
+    const friday = new Date(monday);
+    friday.setDate(monday.getDate() + 4);
+    const from = monday.toISOString().slice(0, 10);
+    const to = friday.toISOString().slice(0, 10);
+    fetchAllAttendance({ from, to });
+  }, []);
+
+  // Also fetch today's attendance separately to keep KPI accurate even on weekends
+  useEffect(() => {
+    (async () => {
+      try {
+        const todayIso = new Date().toISOString().slice(0, 10);
+        const res = await AttendanceAPI.listAll({ from: todayIso, to: todayIso });
+        const data = res?.data;
+        const rows = Array.isArray(data) ? data : Array.isArray(data?.rows) ? data.rows : [];
+        const presentSet = new Set(
+          rows.filter(r => r?.checkIn).map(r => r.userId || r.employeeId || r.Employee?.id || r.id)
+        );
+        setPresentTodayLocal(presentSet.size);
+      } catch (e) {
+        setPresentTodayLocal(null);
+      }
+    })();
   }, []);
   
   // Calculate real-time dashboard stats from live data
@@ -29,7 +57,7 @@ const AdminDashboard = () => {
       .filter(r => r?.checkIn) // has checked in
       .map(r => r.userId || r.employeeId || r.Employee?.id || r.id)
   );
-  const presentTodayCount = presentTodaySet.size;
+  const presentTodayCount = presentTodayLocal ?? presentTodaySet.size;
   const pendingLeaves = leaveRequests.filter(leave => leave.status === 'pending');
   const pendingTasks = tasks.filter(task => task.status === 'pending');
   const thisMonth = new Date().toISOString().slice(0, 7); // YYYY-MM format
@@ -51,13 +79,33 @@ const AdminDashboard = () => {
   const safeTasks = tasks || [];
   const safeEmployees = employees || [];
 
-  const attendanceData = [
-    { name: 'Mon', present: 45, absent: 5 },
-    { name: 'Tue', present: 48, absent: 2 },
-    { name: 'Wed', present: 46, absent: 4 },
-    { name: 'Thu', present: 49, absent: 1 },
-    { name: 'Fri', present: 47, absent: 3 },
-  ];
+  // Build Mon-Fri dataset from real attendance
+  const weekDays = (() => {
+    const now = new Date();
+    const day = now.getDay();
+    const monday = new Date(now);
+    const diffToMon = (day === 0 ? -6 : 1 - day);
+    monday.setDate(now.getDate() + diffToMon);
+    return Array.from({ length: 5 }).map((_, i) => {
+      const d = new Date(monday);
+      d.setDate(monday.getDate() + i);
+      return d;
+    });
+  })();
+
+  const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+  const attendanceData = weekDays.map((d, idx) => {
+    const iso = d.toISOString().slice(0, 10);
+    const dayRecords = (allAttendance || []).filter(r => r?.date === iso);
+    const present = new Set(
+      dayRecords
+        .filter(r => r?.checkIn)
+        .map(r => r.userId || r.employeeId || r.Employee?.id || r.id)
+    ).size;
+    const totalActive = (employees || []).filter(e => (e?.status || 'active') === 'active').length;
+    const absent = Math.max(0, totalActive - present);
+    return { name: dayLabels[idx], present, absent };
+  });
 
   const leaveData = [
     { name: 'Jan', leaves: 12 },

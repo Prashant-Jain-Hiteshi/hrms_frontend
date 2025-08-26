@@ -19,6 +19,7 @@ export const DataProvider = ({ children }) => {
   const [departments, setDepartments] = useState(MOCK_DEPARTMENTS);
   const [myAttendance, setMyAttendance] = useState([]);
   const [attendanceSummary, setAttendanceSummary] = useState(null);
+  const [attendanceStatus, setAttendanceStatus] = useState(null);
   const [attendanceLoading, setAttendanceLoading] = useState(false);
   const [attendanceError, setAttendanceError] = useState(null);
   const { user } = useAuth();
@@ -194,6 +195,32 @@ export const DataProvider = ({ children }) => {
     };
   }, []);
 
+  const fetchAttendanceStatus = async (date) => {
+    try {
+      const { data } = await AttendanceAPI.status(date);
+      setAttendanceStatus(data || null);
+      return data;
+    } catch (e) {
+      setAttendanceStatus(null);
+      return null;
+    }
+  };
+
+  // Load my attendance, summary, and status on auth
+  useEffect(() => {
+    if (user) {
+      const from = new Date();
+      from.setDate(1);
+      fetchMyAttendance({ from: from.toISOString().slice(0, 10) });
+      fetchAttendanceSummary('week');
+      fetchAttendanceStatus();
+      if (user.role === 'admin' || user.role === 'hr') {
+        const today = new Date().toISOString().slice(0, 10);
+        fetchAllAttendance({ from: today, to: today });
+      }
+    }
+  }, [user]);
+
   // Employee CRUD operations
   const addEmployee = async (employeeData) => {
     // Build payload matching backend CreateEmployeeDto
@@ -322,6 +349,7 @@ export const DataProvider = ({ children }) => {
         });
       }
     } catch {}
+    try { await fetchAttendanceStatus(); } catch {}
     return data;
   };
 
@@ -332,6 +360,7 @@ export const DataProvider = ({ children }) => {
         setMyAttendance((prev) => prev.map((r) => (r.date === data.date ? { ...r, ...data } : r)));
       }
     } catch {}
+    try { await fetchAttendanceStatus(); } catch {}
     return data;
   };
 
@@ -734,10 +763,12 @@ export const DataProvider = ({ children }) => {
     attendanceRecords,
     myAttendance,
     attendanceSummary,
+    attendanceStatus,
     attendanceLoading,
     attendanceError,
     fetchMyAttendance,
     fetchAttendanceSummary,
+    fetchAttendanceStatus,
     attendanceCheckIn,
     attendanceCheckOut,
     allAttendance,

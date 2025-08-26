@@ -51,9 +51,7 @@ export const AuthAPI = {
 export const EmployeesAPI = {
   list: (params = {}) => api.get('/employees', { params }),
   create: (data) => api.post('/employees', data),
-  update: (id, data) => api.patch(`/employees/${id}`, data),
   // Using PUT due to browser/PATCH issues
-  // update: (id, data) => api.patch(`/employees/${id}`, data),
   update: (id, data) => api.put(`/employees/${id}`, data),
   remove: (id) => api.delete(`/employees/${id}`),
 };
@@ -65,4 +63,18 @@ export const AttendanceAPI = {
   my: (params = {}) => api.get('/attendance/me', { params }),
   summary: (range = 'week') => api.get('/attendance/summary', { params: { range } }),
   listAll: (params = {}) => api.get('/attendance', { params }),
+  status: (date) => api.get('/attendance/status', { params: date ? { date } : {} }),
+  adminStatus: (userId, date) => api.get('/attendance/admin-status', { params: { userId, ...(date ? { date } : {}) } }),
+  updateSession: ({ sessionId, startTime, endTime }) => api.put('/attendance/admin-session', { sessionId, startTime, endTime }),
+  generateReport: async ({ type, date, from, to, format = 'excel' } = {}) => {
+    const params = { type, format };
+    if (type === 'daily' && date) params.date = date;
+    if (type === 'monthly' && date) params.date = date; // yyyy-mm
+    if (type === 'range') {
+      if (from) params.from = from;
+      if (to) params.to = to;
+    }
+    const res = await api.get('/attendance/report', { params, responseType: 'blob' });
+    return res.data; // blob
+  },
 };
