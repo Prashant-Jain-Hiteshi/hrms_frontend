@@ -7,10 +7,15 @@ import {
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
 import { getDashboardStats, MOCK_LEAVE_REQUESTS, MOCK_JOB_OPENINGS } from '../../data/mockData';
+import { useData } from '../../contexts/DataContext';
 
 const HRDashboard = () => {
   const navigate = useNavigate();
   const stats = getDashboardStats('hr');
+  const { employees } = useData();
+  const totalActiveEmployees = Array.isArray(employees)
+    ? employees.filter(e => (e.status || 'active') === 'active').length
+    : 0;
 
   const recruitmentData = [
     { name: 'Jan', applications: 45, hired: 8 },
@@ -55,7 +60,7 @@ const HRDashboard = () => {
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{stats.totalEmployees}</div>
+            <div className="text-2xl font-bold">{totalActiveEmployees}</div>
             <p className="text-xs text-muted-foreground">Active workforce</p>
           </CardContent>
         </Card>

@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { MOCK_EMPLOYEES, MOCK_DEPARTMENTS } from '../data/mockData';
 import { useAuth } from './AuthContext';
-import { EmployeesAPI } from '../lib/api';
+import { EmployeesAPI, AttendanceAPI } from '../lib/api';
 
 const DataContext = createContext();
 
@@ -17,6 +17,13 @@ export const DataProvider = ({ children }) => {
   // Core data states
   const [employees, setEmployees] = useState([]);
   const [departments, setDepartments] = useState(MOCK_DEPARTMENTS);
+  const [myAttendance, setMyAttendance] = useState([]);
+  const [attendanceSummary, setAttendanceSummary] = useState(null);
+  const [attendanceLoading, setAttendanceLoading] = useState(false);
+  const [attendanceError, setAttendanceError] = useState(null);
+  const { user } = useAuth();
+  const [allAttendance, setAllAttendance] = useState([]);
+  const [allAttendanceLoading, setAllAttendanceLoading] = useState(false);
   
   // Extended module states
   const [jobs, setJobs] = useState([
@@ -273,6 +280,79 @@ export const DataProvider = ({ children }) => {
   };
 
   // Attendance CRUD operations
+  // Backend-powered: self-service attendance for the logged-in user
+  const fetchMyAttendance = async (params = {}) => {
+    try {
+      setAttendanceLoading(true);
+      setAttendanceError(null);
+      const { data } = await AttendanceAPI.my(params);
+      setMyAttendance(Array.isArray(data) ? data : []);
+      return data;
+    } catch (e) {
+      setAttendanceError(e?.response?.data?.message || 'Failed to load attendance');
+      return [];
+    } finally {
+      setAttendanceLoading(false);
+    }
+  };
+
+  const fetchAttendanceSummary = async (range = 'week') => {
+    try {
+      const { data } = await AttendanceAPI.summary(range);
+      setAttendanceSummary(data);
+      return data;
+    } catch (e) {
+      return null;
+    }
+  };
+
+  const attendanceCheckIn = async (payload = {}) => {
+    const { data } = await AttendanceAPI.checkIn(payload);
+    // If the check-in date is today, merge/update local myAttendance
+    try {
+      if (data?.date) {
+        setMyAttendance((prev) => {
+          const idx = prev.findIndex((r) => r.date === data.date);
+          if (idx >= 0) {
+            const copy = [...prev];
+            copy[idx] = { ...copy[idx], ...data };
+            return copy;
+          }
+          return [data, ...prev];
+        });
+      }
+    } catch {}
+    return data;
+  };
+
+  const attendanceCheckOut = async (payload = {}) => {
+    const { data } = await AttendanceAPI.checkOut(payload);
+    try {
+      if (data?.date) {
+        setMyAttendance((prev) => prev.map((r) => (r.date === data.date ? { ...r, ...data } : r)));
+      }
+    } catch {}
+    return data;
+  };
+
+  // Admin/HR: fetch all attendance records (optionally filtered by date range)
+  const fetchAllAttendance = async (params = {}) => {
+    try {
+      setAllAttendanceLoading(true);
+      const res = await AttendanceAPI.listAll(params);
+      const data = res?.data;
+      const rows = Array.isArray(data) ? data : Array.isArray(data?.rows) ? data.rows : [];
+      setAllAttendance(rows);
+      return rows;
+    } catch (e) {
+      setAllAttendance([]);
+      return [];
+    } finally {
+      setAllAttendanceLoading(false);
+    }
+  };
+
+  // Keep existing mock helpers for admin tables until backend endpoints are built for all-employee views
   const addAttendanceRecord = (recordData) => {
     const newRecord = {
       ...recordData,
@@ -652,6 +732,17 @@ export const DataProvider = ({ children }) => {
     
     // Attendance CRUD
     attendanceRecords,
+    myAttendance,
+    attendanceSummary,
+    attendanceLoading,
+    attendanceError,
+    fetchMyAttendance,
+    fetchAttendanceSummary,
+    attendanceCheckIn,
+    attendanceCheckOut,
+    allAttendance,
+    allAttendanceLoading,
+    fetchAllAttendance,
     addAttendanceRecord,
     updateAttendanceRecord,
     deleteAttendanceRecord,

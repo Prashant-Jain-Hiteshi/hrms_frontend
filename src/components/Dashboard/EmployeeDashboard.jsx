@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
@@ -14,8 +14,15 @@ import { useAuth } from '../../contexts/AuthContext';
 const EmployeeDashboard = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { dashboardStats, leaveRequests, attendanceRecords, tasks } = useData();
+  const { leaveRequests, tasks, myAttendance, fetchMyAttendance } = useData();
   const stats = getDashboardStats('employee');
+
+  // Load my attendance for current month (for today status and month count)
+  useEffect(() => {
+    const from = new Date();
+    from.setDate(1);
+    fetchMyAttendance({ from: from.toISOString().slice(0, 10) });
+  }, []);
 
   // Get employee-specific data
   const myLeaveRequests = leaveRequests.filter(req => 
@@ -23,16 +30,24 @@ const EmployeeDashboard = () => {
     req.employeeId === user?.id || 
     req.name === user?.name
   );
-  const myAttendance = attendanceRecords.filter(rec => 
-    rec.employeeId === user?.employeeId || 
-    rec.employeeId === user?.id || 
-    rec.name === user?.name
-  );
+  const myAttendanceSafe = Array.isArray(myAttendance) ? myAttendance : [];
+  const now = new Date();
+  const currentMonth = now.getMonth();
+  const currentYear = now.getFullYear();
+  const myAttendanceThisMonth = myAttendanceSafe.filter(r => {
+    if (!r?.date) return false;
+    const d = new Date(r.date);
+    return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+  });
   const myTasks = tasks.filter(task => task.assignee === user?.name);
 
   // Calculate employee stats
   const myLeaveBalance = 25 - myLeaveRequests.filter(req => req.status === 'approved').reduce((sum, req) => sum + req.days, 0);
-  const attendanceThisMonth = myAttendance.filter(rec => rec.status === 'present').length;
+  // Present this month: any day with a check-in (includes 'present' and 'late')
+  const attendanceThisMonth = myAttendanceThisMonth.filter(rec => !!rec.checkIn).length;
+  const today = new Date().toISOString().slice(0, 10);
+  const todayRec = myAttendanceSafe.find(r => r.date === today);
+  const presentToday = !!todayRec?.checkIn;
   const pendingTasks = myTasks.filter(task => task.status === 'pending').length;
 
   const handleApplyLeave = () => {
@@ -51,12 +66,21 @@ const EmployeeDashboard = () => {
     navigate('/performance');
   };
 
-  const attendanceData = [
-    { name: 'Week 1', present: 5, absent: 0 },
-    { name: 'Week 2', present: 4, absent: 1 },
-    { name: 'Week 3', present: 5, absent: 0 },
-    { name: 'Week 4', present: 5, absent: 0 },
+  // Build weekly chart (current month only) with 4 buckets shown in UI
+  const weeks = [
+    { name: 'Week 1', present: 0, absent: 0 },
+    { name: 'Week 2', present: 0, absent: 0 },
+    { name: 'Week 3', present: 0, absent: 0 },
+    { name: 'Week 4', present: 0, absent: 0 },
   ];
+  myAttendanceThisMonth.forEach((rec) => {
+    const d = new Date(rec.date);
+    const day = d.getDate();
+    const idx = Math.min(3, Math.floor((day - 1) / 7));
+    if (rec.checkIn) weeks[idx].present += 1;
+    else if (rec.status === 'absent') weeks[idx].absent += 1;
+  });
+  const attendanceData = weeks;
 
   const leaveBalanceData = [
     { name: 'Used', value: 7, color: '#ef4444' },
@@ -103,7 +127,7 @@ const EmployeeDashboard = () => {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{attendanceThisMonth}</div>
-            <p className="text-xs text-muted-foreground">Days this month</p>
+            <p className="text-xs text-muted-foreground">Today: {presentToday ? 'Present' : 'Absent'}</p>
           </CardContent>
         </Card>
 

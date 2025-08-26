@@ -57,3 +57,12 @@ export const EmployeesAPI = {
   update: (id, data) => api.put(`/employees/${id}`, data),
   remove: (id) => api.delete(`/employees/${id}`),
 };
+
+// Attendance endpoints
+export const AttendanceAPI = {
+  checkIn: (data = {}) => api.post('/attendance/check-in', data),
+  checkOut: (data = {}) => api.post('/attendance/check-out', data),
+  my: (params = {}) => api.get('/attendance/me', { params }),
+  summary: (range = 'week') => api.get('/attendance/summary', { params: { range } }),
+  listAll: (params = {}) => api.get('/attendance', { params }),
+};

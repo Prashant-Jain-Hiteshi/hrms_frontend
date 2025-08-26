@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
@@ -12,14 +12,24 @@ import { MOCK_ANNOUNCEMENTS } from '../../data/mockData';
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
-  const { employees, leaveRequests, tasks, attendanceRecords, quickActions } = useData();
+  const { employees, leaveRequests, tasks, allAttendance, allAttendanceLoading, fetchAllAttendance, quickActions } = useData();
   
-  // Calculate real-time dashboard stats
-  const activeEmployees = employees.filter(emp => emp.status === 'active');
-  const presentToday = attendanceRecords.filter(record => 
-    record.status === 'present' && 
-    record.date === new Date().toISOString().split('T')[0]
+  // Load today's attendance for admin/hr dashboard counts
+  useEffect(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    fetchAllAttendance({ from: today, to: today });
+  }, []);
+  
+  // Calculate real-time dashboard stats from live data
+  const activeEmployees = (employees || []).filter(emp => (emp?.status || 'active') === 'active');
+  const today = new Date().toISOString().split('T')[0];
+  const todaysAttendance = (allAttendance || []).filter(r => r?.date === today);
+  const presentTodaySet = new Set(
+    todaysAttendance
+      .filter(r => r?.checkIn) // has checked in
+      .map(r => r.userId || r.employeeId || r.Employee?.id || r.id)
   );
+  const presentTodayCount = presentTodaySet.size;
   const pendingLeaves = leaveRequests.filter(leave => leave.status === 'pending');
   const pendingTasks = tasks.filter(task => task.status === 'pending');
   const thisMonth = new Date().toISOString().slice(0, 7); // YYYY-MM format
@@ -29,8 +39,8 @@ const AdminDashboard = () => {
 
   const stats = {
     totalEmployees: activeEmployees.length,
-    presentToday: presentToday.length,
-    absentToday: activeEmployees.length - presentToday.length,
+    presentToday: presentTodayCount,
+    absentToday: Math.max(0, activeEmployees.length - presentTodayCount),
     pendingLeaves: pendingLeaves.length,
     pendingTasks: pendingTasks.length,
     newEmployeesThisMonth: newEmployeesThisMonth.length

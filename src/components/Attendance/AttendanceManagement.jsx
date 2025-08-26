@@ -4,24 +4,34 @@ import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Users, Clock, Timer, Search, Filter, CheckCircle, XCircle, Eye, Download, Calendar } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { MOCK_EMPLOYEES, MOCK_ATTENDANCE } from '../../data/mockData';
 import { useAuth } from '../../contexts/AuthContext';
+import { useEffect } from 'react';
+import { useData } from '../../contexts/DataContext';
 
 const AttendanceManagement = () => {
   const { user } = useAuth();
+  const {
+    myAttendance,
+    attendanceSummary,
+    attendanceLoading,
+    fetchMyAttendance,
+    fetchAttendanceSummary,
+    attendanceCheckIn,
+    attendanceCheckOut,
+    allAttendance,
+    allAttendanceLoading,
+    fetchAllAttendance,
+    employees,
+  } = useData();
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [isCheckedIn, setIsCheckedIn] = useState(false);
   const [checkInTime, setCheckInTime] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedRecord, setSelectedRecord] = useState(null);
   const [showViewModal, setShowViewModal] = useState(false);
-  const [attendanceRecords, setAttendanceRecords] = useState([
-    { id: 1, name: 'John Doe', checkIn: '09:15', checkOut: '18:30', status: 'present', hours: '8h 15m' },
-    { id: 2, name: 'Jane Smith', checkIn: '09:00', checkOut: '18:00', status: 'present', hours: '8h 0m' },
-    { id: 3, name: 'Mike Johnson', checkIn: '09:30', checkOut: '-', status: 'present', hours: '7h 30m' },
-    { id: 4, name: 'Sarah Wilson', checkIn: '-', checkOut: '-', status: 'absent', hours: '0h 0m' },
-  ]);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [confirmType, setConfirmType] = useState(null); // 'checkin' | 'checkout'
 
   const attendanceData = [
     { name: 'Mon', present: 45, absent: 5, late: 3 },
@@ -32,16 +42,14 @@ const AttendanceManagement = () => {
   ];
 
   const handleEditRecord = (recordData) => {
-    setAttendanceRecords(attendanceRecords.map(record => 
-      record.id === selectedRecord.id ? { ...record, ...recordData } : record
-    ));
+    // For now, local-only edit modal; backend update not implemented here
     setShowEditModal(false);
     setSelectedRecord(null);
   };
 
   const handleDeleteRecord = (recordId) => {
     if (window.confirm('Are you sure you want to delete this attendance record?')) {
-      setAttendanceRecords(attendanceRecords.filter(record => record.id !== recordId));
+      // Local-only deletion placeholder; backend deletion not implemented
     }
   };
 
@@ -50,15 +58,61 @@ const AttendanceManagement = () => {
     setShowEditModal(true);
   };
 
-  const handleCheckIn = () => {
-    const now = new Date();
-    setCheckInTime(now.toLocaleTimeString());
+  useEffect(() => {
+    if (user) {
+      // Load my attendance for current month and summary for week
+      const from = new Date();
+      from.setDate(1);
+      fetchMyAttendance({ from: from.toISOString().slice(0, 10) });
+      fetchAttendanceSummary('week');
+      if (user.role === 'admin' || user.role === 'hr') {
+        // Load all attendance for today by default
+        const today = new Date().toISOString().slice(0, 10);
+        fetchAllAttendance({ from: today, to: today });
+      }
+    }
+  }, [user]);
+
+  useEffect(() => {
+    // infer checked-in state from today's record
+    const today = new Date().toISOString().slice(0, 10);
+    const todayRecord = myAttendance?.find((r) => r.date === today);
+    if (todayRecord?.checkIn && !todayRecord?.checkOut) {
+      setIsCheckedIn(true);
+      setCheckInTime(todayRecord.checkIn);
+    } else {
+      setIsCheckedIn(false);
+      setCheckInTime(todayRecord?.checkIn || null);
+    }
+  }, [myAttendance]);
+
+  const handleCheckIn = async () => {
+    const data = await attendanceCheckIn({});
     setIsCheckedIn(true);
+    setCheckInTime(data?.checkIn || new Date().toLocaleTimeString());
   };
 
-  const handleCheckOut = () => {
+  const handleCheckOut = async () => {
+    await attendanceCheckOut({});
     setIsCheckedIn(false);
-    setCheckInTime(null);
+  };
+
+  const openConfirm = (type) => {
+    setConfirmType(type);
+    setShowConfirm(true);
+  };
+  const onConfirmProceed = async () => {
+    if (confirmType === 'checkin') {
+      await handleCheckIn();
+    } else if (confirmType === 'checkout') {
+      await handleCheckOut();
+    }
+    setShowConfirm(false);
+    setConfirmType(null);
+  };
+  const onConfirmCancel = () => {
+    setShowConfirm(false);
+    setConfirmType(null);
   };
 
   const handleExportAttendance = () => {
@@ -72,15 +126,15 @@ const AttendanceManagement = () => {
   
   const generateAttendanceCSV = () => {
     const headers = ['Employee ID', 'Name', 'Department', 'Date', 'Check In', 'Check Out', 'Status', 'Hours'];
-    const data = attendanceRecords.map(record => [
-      record.employeeId,
-      record.name,
+    const data = derivedRecords.map(record => [
+      record.employeeId || '-',
+      record.name || '-',
       record.department || 'N/A',
-      record.date,
-      record.checkIn,
-      record.checkOut,
-      record.status,
-      record.hours
+      record.date || '-',
+      record.checkIn || '-',
+      record.checkOut || '-',
+      record.status || '-',
+      record.hours || '-'
     ]);
     return convertToCSV([headers, ...data]);
   };
@@ -101,9 +155,85 @@ const AttendanceManagement = () => {
     document.body.removeChild(link);
   };
 
-  const filteredAttendance = attendanceRecords.filter(record =>
-    record.name.toLowerCase().includes(searchTerm.toLowerCase())
+  // Build the dataset used by the table depending on role
+  const today = new Date().toISOString().slice(0, 10);
+  const adminToday = (allAttendance || []).filter(r => r?.date === today);
+  const selfToday = (myAttendance || []).find(r => r.date === today);
+  const hasCheckedInToday = !!selfToday?.checkIn;
+  const hasCheckedOutToday = !!selfToday?.checkOut;
+  const toHoursDisplay = (hoursWorked, checkIn, checkOut) => {
+    const pad2 = (n) => String(n).padStart(2, '0');
+    const fmt = (totalSeconds) => {
+      const sec = Math.max(0, Math.round(totalSeconds));
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      const s = sec % 60;
+      return `${pad2(h)}:${pad2(m)}:${pad2(s)}`;
+    };
+
+    // Prefer exact computation from checkIn/checkOut if available
+    const parseToSec = (t) => {
+      if (!t) return null;
+      const [hh = 0, mm = 0, ss = 0] = t.split(':').map(Number);
+      if (Number.isNaN(hh) || Number.isNaN(mm) || Number.isNaN(ss)) return null;
+      return hh * 3600 + mm * 60 + ss;
+    };
+    const si = parseToSec(checkIn);
+    const so = parseToSec(checkOut);
+    if (si !== null && so !== null && so >= si) {
+      return fmt(so - si);
+    }
+
+    // Fallback to decimal hoursWorked -> HH:MM:SS
+    if (hoursWorked !== undefined && hoursWorked !== null && hoursWorked !== '') {
+      const n = Number(hoursWorked);
+      if (!Number.isNaN(n)) return fmt(n * 3600);
+    }
+    return '-';
+  };
+  const mapToRow = (r, idx) => ({
+    id: r.id || idx,
+    employeeId: r.employeeId || r.Employee?.employeeId || r.Employee?.id || '-',
+    name: r.Employee?.name || r.employee?.name || r.name || r.userEmail || 'N/A',
+    department: r.Employee?.department || r.department,
+    date: r.date,
+    checkIn: r.checkIn || '-',
+    checkOut: r.checkOut || '-',
+    status: r.status || (r.checkIn ? 'present' : 'absent'),
+    hours: toHoursDisplay(r.hoursWorked, r.checkIn, r.checkOut)
+  });
+  const derivedRecords = (user?.role === 'employee'
+    ? (myAttendance || []).map((r, idx) => ({
+        id: r.id || idx,
+        employeeId: '-',
+        name: user?.firstName ? `${user.firstName} ${user.lastName || ''}` : user?.email,
+        department: '-',
+        date: r.date,
+        checkIn: r.checkIn || '-',
+        checkOut: r.checkOut || '-',
+        status: r.status || (r.checkIn ? 'present' : 'absent'),
+        hours: toHoursDisplay(r.hoursWorked, r.checkIn, r.checkOut)
+      }))
+    : adminToday.map(mapToRow)
+  ).filter(record => (record.name || '').toLowerCase().includes(searchTerm.toLowerCase()));
+
+  // Summary metrics: Present Today, Absent Today, Late Today (role-aware)
+  const activeEmployees = (employees || []).filter(e => (e?.status || 'active') === 'active');
+  const todayMy = (myAttendance || []).find(r => r.date === today);
+  const adminTodaySet = new Set(
+    (adminToday || [])
+      .filter(r => r?.checkIn)
+      .map(r => r.userId || r.employeeId || r.Employee?.id || r.id)
   );
+  const presentTodayCount = (user?.role === 'employee')
+    ? (todayMy?.checkIn ? 1 : 0)
+    : adminTodaySet.size;
+  const absentTodayCount = (user?.role === 'employee')
+    ? (presentTodayCount ? 0 : 1)
+    : Math.max(0, activeEmployees.length - presentTodayCount);
+  const lateTodayCount = (user?.role === 'employee')
+    ? (todayMy?.status === 'late' ? 1 : 0)
+    : (adminToday || []).filter(r => r?.status === 'late').length;
 
   return (
     <div className="space-y-6">
@@ -154,12 +284,12 @@ const AttendanceManagement = () => {
               </div>
               <div className="flex space-x-3">
                 {!isCheckedIn ? (
-                  <Button onClick={handleCheckIn} variant="success" className="flex items-center">
+                  <Button onClick={() => openConfirm('checkin')} variant="success" className="flex items-center" disabled={hasCheckedInToday} title={hasCheckedInToday ? 'Already checked in today' : 'Check in for today'}>
                     <Clock className="h-4 w-4 mr-2" />
                     Check In
                   </Button>
                 ) : (
-                  <Button onClick={handleCheckOut} variant="destructive" className="flex items-center">
+                  <Button onClick={() => openConfirm('checkout')} variant="destructive" className="flex items-center" disabled={hasCheckedOutToday} title={hasCheckedOutToday ? 'Already checked out today' : 'Check out for today'}>
                     <Clock className="h-4 w-4 mr-2" />
                     Check Out
                   </Button>
@@ -178,8 +308,8 @@ const AttendanceManagement = () => {
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-green-600">47</div>
-            <p className="text-xs text-muted-foreground">94% attendance rate</p>
+            <div className="text-2xl font-bold text-green-600">{presentTodayCount}</div>
+            <p className="text-xs text-muted-foreground">Today</p>
           </CardContent>
         </Card>
 
@@ -189,8 +319,8 @@ const AttendanceManagement = () => {
             <XCircle className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-red-600">3</div>
-            <p className="text-xs text-muted-foreground">6% absent rate</p>
+            <div className="text-2xl font-bold text-red-600">{absentTodayCount}</div>
+            <p className="text-xs text-muted-foreground">Active employees: {user?.role === 'employee' ? 1 : activeEmployees.length}</p>
           </CardContent>
         </Card>
 
@@ -200,7 +330,7 @@ const AttendanceManagement = () => {
             <Timer className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-yellow-600">2</div>
+            <div className="text-2xl font-bold text-yellow-600">{lateTodayCount}</div>
             <p className="text-xs text-muted-foreground">After 9:15 AM</p>
           </CardContent>
         </Card>
@@ -211,7 +341,7 @@ const AttendanceManagement = () => {
             <Clock className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-blue-600">8.2</div>
+            <div className="text-2xl font-bold text-blue-600">{myAttendance?.length ? (Math.round((myAttendance.reduce((acc, r) => acc + (Number(r.hoursWorked) || 0), 0) / myAttendance.length) * 10) / 10) : '-'}</div>
             <p className="text-xs text-muted-foreground">Hours per day</p>
           </CardContent>
         </Card>
@@ -238,7 +368,7 @@ const AttendanceManagement = () => {
         </CardContent>
       </Card>
 
-      {/* Today's Attendance Table */}
+      {/* Today's Attendance Table (employee sees own records; admin/hr keeps mock list for now) */}
       <Card>
         <CardHeader>
           <CardTitle>Today's Attendance</CardTitle>
@@ -274,7 +404,13 @@ const AttendanceManagement = () => {
                 </tr>
               </thead>
               <tbody>
-                {filteredAttendance.map((record) => (
+                {(user?.role !== 'employee' && allAttendanceLoading) ? (
+                  <tr>
+                    <td className="py-6 px-4 text-center text-sm text-gray-500 dark:text-gray-400" colSpan={6}>
+                      Loading attendance...
+                    </td>
+                  </tr>
+                ) : derivedRecords.map((record) => (
                   <tr key={record.id} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
                     <td className="py-3 px-4">
                       <div className="flex items-center space-x-3">
@@ -291,6 +427,8 @@ const AttendanceManagement = () => {
                       <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                         record.status === 'present' 
                           ? 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400'
+                          : record.status === 'late'
+                          ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400'
                           : 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400'
                       }`}>
                         {record.status.toUpperCase()}
@@ -440,6 +578,31 @@ const AttendanceManagement = () => {
             <div className="flex justify-end space-x-3 mt-6">
               <Button variant="outline" onClick={() => setShowViewModal(false)}>
                 Close
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm Check In/Out Modal */}
+      {showConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-900 rounded-lg p-6 w-full max-w-md">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                {confirmType === 'checkin' ? 'Confirm Check In' : 'Confirm Check Out'}
+              </h3>
+              <Button variant="ghost" size="sm" onClick={onConfirmCancel}>
+                <XCircle className="h-4 w-4" />
+              </Button>
+            </div>
+            <p className="text-sm text-gray-600 dark:text-gray-300 mb-6">
+              Are you sure you want to {confirmType === 'checkin' ? 'check in' : 'check out'} for today ({new Date().toLocaleDateString()})?
+            </p>
+            <div className="flex justify-end space-x-3">
+              <Button variant="outline" onClick={onConfirmCancel}>Cancel</Button>
+              <Button variant={confirmType === 'checkin' ? 'success' : 'destructive'} onClick={onConfirmProceed}>
+                {confirmType === 'checkin' ? 'Yes, Check In' : 'Yes, Check Out'}
               </Button>
             </div>
           </div>
