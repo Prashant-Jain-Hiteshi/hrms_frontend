@@ -65,6 +65,7 @@ export const AttendanceAPI = {
   listAll: (params = {}) => api.get('/attendance', { params }),
   status: (date) => api.get('/attendance/status', { params: date ? { date } : {} }),
   adminStatus: (userId, date) => api.get('/attendance/admin-status', { params: { userId, ...(date ? { date } : {}) } }),
+  weekly: () => api.get('/attendance/weekly'),
   updateSession: ({ sessionId, startTime, endTime }) => api.put('/attendance/admin-session', { sessionId, startTime, endTime }),
   generateReport: async ({ type, date, from, to, format = 'excel' } = {}) => {
     const params = { type, format };

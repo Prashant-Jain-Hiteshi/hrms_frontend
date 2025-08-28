@@ -37,6 +37,8 @@ const AttendanceManagement = () => {
     fetchAllAttendance,
     employees,
   } = useData();
+  const [weeklyData, setWeeklyData] = useState([]);
+  const [weeklyLoading, setWeeklyLoading] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [isCheckedIn, setIsCheckedIn] = useState(false);
   const [checkInTime, setCheckInTime] = useState(null);
@@ -182,6 +184,30 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
       fetchAttendanceStatus();
       if (user.role === 'admin' || user.role === 'hr') {
         fetchAdminList();
+        // also fetch weekly overview from backend
+        (async () => {
+          try {
+            setWeeklyLoading(true);
+            const res = await AttendanceAPI.weekly();
+            const days = Array.isArray(res?.data?.days) ? res.data.days : [];
+            // Build names client-side from date to prevent server-timezone label drift
+            const toName = (iso) => {
+              try {
+                const [Y, M, D] = String(iso).split('-').map(Number);
+                const dd = new Date(Y, (M || 1) - 1, D || 1, 0, 0, 0, 0); // local date
+                return dd.toLocaleDateString('en-US', { weekday: 'short' });
+              } catch { return String(iso); }
+            };
+            const data = days
+              .map(d => ({ date: d.date, name: toName(d.date), present: d.present || 0, absent: d.absent || 0, late: d.late || 0 }))
+              .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+            setWeeklyData(data);
+          } catch (e) {
+            setWeeklyData([]);
+          } finally {
+            setWeeklyLoading(false);
+          }
+        })();
       }
     }
   }, [user]);
@@ -275,12 +301,21 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
   };
 
   // Build the dataset used by the table depending on role
-  const today = new Date().toISOString().slice(0, 10);
+  // Compute local today yyyy-mm-dd (not UTC) to align with backend iso-only dates
+  const pad2 = (n) => String(n).padStart(2, '0');
+  const now = new Date();
+  const today = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
   // Admin filters/state
   const [adminType, setAdminType] = useState('daily'); // 'daily' | 'monthly'
   const [adminPicker, setAdminPicker] = useState(() => new Date().toISOString().slice(0, 10)); // daily date or month base
   const [entriesPerPage, setEntriesPerPage] = useState(10);
   const [adminStatus, setAdminStatus] = useState('all'); // 'all' | 'present' | 'late' | 'absent'
+
+  // Employee filters/state
+  const [empType, setEmpType] = useState('daily'); // 'daily' | 'monthly'
+  const [empPicker, setEmpPicker] = useState(today); // daily date (YYYY-MM-DD) or month base (YYYY-MM)
+  const [empStatus, setEmpStatus] = useState('all'); // 'all' | 'present' | 'late' | 'absent'
+  const [empEntriesPerPage, setEmpEntriesPerPage] = useState(10);
 
   const adminBackendDate = () => {
     if (adminType === 'daily') return adminPicker; // yyyy-mm-dd
@@ -413,64 +448,74 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
     status: r.status || (r.checkIn ? 'present' : 'absent'),
     hours: toHoursDisplay(r.hoursWorked, r.checkIn, r.checkOut)
   });
-  const derivedRecords = (user?.role === 'employee'
-    ? (myAttendance || []).map((r, idx) => ({
-        id: r.id || idx,
-        employeeId: '-',
-        name: user?.firstName ? `${user.firstName} ${user.lastName || ''}` : user?.email,
-        department: '-',
-        date: r.date,
-        checkIn: r.checkIn || '-',
-        // For today, show last closed session's endTime as Check Out
-        checkOut: r.date === today ? (lastCheckoutTime || '-') : (r.checkOut || '-'),
-        status: r.status || (r.checkIn ? 'present' : 'absent'),
-        // For today, compute hours from sessions accurately (including ongoing)
-        hours: r.date === today ? formatSec(totalSecondsFromSessions()) : toHoursDisplay(r.hoursWorked, r.checkIn, r.checkOut)
-      }))
-    : (allAttendance || []).map(mapToRow)
-  ).filter(record => (record.name || '').toLowerCase().includes(searchTerm.toLowerCase()))
-   .slice(0, entriesPerPage);
+  const isEmployee = user?.role === 'employee';
+  // Build employee list with employee filters applied
+  const employeeRecords = (() => {
+    const monthKey = /^\d{4}-\d{2}$/.test(empPicker) ? empPicker : String(empPicker || today).slice(0, 7);
+    const source = (myAttendance || [])
+      .filter(r => r?.date && String(r.date) <= today)
+      .filter(r => {
+        if (empType === 'daily') return String(r.date) === String(empPicker);
+        // monthly
+        return String(r.date).startsWith(monthKey);
+      })
+      .filter(r => {
+        if (empStatus === 'all') return true;
+        const st = (r.status || (r.checkIn ? 'present' : 'absent')).toLowerCase();
+        return st === empStatus;
+      })
+      .sort((a, b) => String(b.date).localeCompare(String(a.date)))
+      .slice(0, empEntriesPerPage);
+
+    return source.map((r, idx) => ({
+      id: r.id || idx,
+      employeeId: '-',
+      name: user?.firstName ? `${user.firstName} ${user.lastName || ''}` : user?.email,
+      department: '-',
+      date: r.date,
+      checkIn: r.checkIn || '-',
+      checkOut: r.date === today ? (lastCheckoutTime || '-') : (r.checkOut || '-'),
+      status: r.status || (r.checkIn ? 'present' : 'absent'),
+      hours: r.date === today ? formatSec(totalSecondsFromSessions()) : toHoursDisplay(r.hoursWorked, r.checkIn, r.checkOut)
+    }));
+  })();
+  const adminRecords = (allAttendance || []).map(mapToRow)
+    .filter(record => (record.name || '').toLowerCase().includes(searchTerm.toLowerCase()))
+    .slice(0, entriesPerPage);
+  const derivedRecords = isEmployee ? employeeRecords : adminRecords;
+
+  // Format yyyy-mm-dd to M/D/YYYY (e.g., 8/26/2025) in local US style
+  const fmtUSDate = (iso) => {
+    try {
+      const d = new Date(`${iso}T00:00:00`);
+      return d.toLocaleDateString('en-US');
+    } catch { return String(iso); }
+  };
 
   // Summary metrics: Present Today, Absent Today, Late Today (role-aware)
   const activeEmployees = (employees || []).filter(e => (e?.status || 'active') === 'active');
   const todayMy = (myAttendance || []).find(r => r.date === today);
   const adminTodayPresent = (allAttendance || []).filter(r => r?.date === today && r?.checkIn);
+  // Prefer backend weekly aggregated data for Admin/HR to keep charts and KPIs consistent
+  const weeklyToday = (user?.role === 'admin' || user?.role === 'hr')
+    ? (() => {
+        const byDate = (weeklyData || []).find(d => d.date === today);
+        if (byDate) return byDate;
+        const todayName = new Date().toLocaleDateString('en-US', { weekday: 'short' });
+        return (weeklyData || []).find(d => d.name === todayName) || null;
+      })()
+    : null;
   const presentTodayCount = (user?.role === 'employee')
     ? (todayMy?.checkIn ? 1 : 0)
-    : new Set(adminTodayPresent.map(r => r.userId || r.employeeId || r.Employee?.id || r.id)).size;
+    : (weeklyToday ? weeklyToday.present : new Set(adminTodayPresent.map(r => r.userId || r.employeeId || r.Employee?.id || r.id)).size);
   const absentTodayCount = (user?.role === 'employee')
     ? (presentTodayCount ? 0 : 1)
-    : Math.max(0, activeEmployees.length - presentTodayCount);
+    : (weeklyToday ? weeklyToday.absent : Math.max(0, activeEmployees.length - presentTodayCount));
   const lateTodayCount = (user?.role === 'employee')
     ? (todayMy?.status === 'late' ? 1 : 0)
-    : (allAttendance || []).filter(r => r?.date === today && r?.status === 'late').length;
+    : (weeklyToday ? weeklyToday.late : (allAttendance || []).filter(r => r?.date === today && r?.status === 'late').length);
 
-  // Charts: build weekly dataset (Mon–Fri) for HR/Admin
-  const startOfWeek = (d) => {
-    const date = new Date(d);
-    const day = date.getDay(); // 0 Sun .. 6 Sat
-    const diffToMon = (day + 6) % 7; // Mon=0
-    date.setDate(date.getDate() - diffToMon);
-    date.setHours(0,0,0,0);
-    return date;
-  };
-  const formatDay = (d) => d.toLocaleDateString('en-US', { weekday: 'short' });
-  const fmtISO = (d) => new Date(d.getTime() - d.getTimezoneOffset()*60000).toISOString().slice(0,10);
-  const weekStart = startOfWeek(new Date());
-  const daysOfWeek = Array.from({ length: 5 }, (_, i) => {
-    const dd = new Date(weekStart);
-    dd.setDate(weekStart.getDate() + i);
-    return dd;
-  });
-  const weekData = daysOfWeek.map((d) => {
-    const iso = fmtISO(d);
-    const dayRecords = (allAttendance || []).filter(r => r?.date === iso);
-    const present = new Set(dayRecords.filter(r => r?.checkIn).map(r => r.userId || r.employeeId || r.Employee?.id || r.id)).size;
-    const late = dayRecords.filter(r => r?.status === 'late').length;
-    const totalActive = (employees || []).filter(e => (e?.status || 'active') === 'active').length;
-    const absent = Math.max(0, totalActive - present);
-    return { name: formatDay(d), present, late, absent };
-  });
+  // Weekly charts now use backend-provided data in weeklyData
 
   const [reportOpen, setReportOpen] = useState(false);
   const [reportType, setReportType] = useState('daily');
@@ -656,7 +701,7 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
             </CardHeader>
             <CardContent>
               <ResponsiveContainer width="100%" height={300}>
-                <BarChart data={weekData}>
+                <BarChart data={weeklyData}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="name" />
                   <YAxis />
@@ -668,20 +713,32 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
             </CardContent>
           </Card>
 
-          {/* Leave Trends (using weekly late counts as placeholder for leaves) */}
+          {/* Late Trends (weekly late arrivals from backend) */}
           <Card>
             <CardHeader>
-              <CardTitle>Leave Trends</CardTitle>
-              <CardDescription>Monthly leave requests over time</CardDescription>
+              <CardTitle>Late Trends</CardTitle>
+              <CardDescription>Weekly late arrivals over time</CardDescription>
             </CardHeader>
             <CardContent>
               <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={weekData}>
+                <LineChart data={weeklyData}>
                   <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="name" />
+                  <XAxis dataKey="date" tickFormatter={(d) => {
+                    try {
+                      const [Y,M,D] = String(d).split('-').map(Number);
+                      const dd = new Date(Y, (M||1)-1, D||1);
+                      return dd.toLocaleDateString('en-US', { weekday: 'short' });
+                    } catch { return d; }
+                  }} />
                   <YAxis />
-                  <Tooltip />
-                  <Line type="monotone" dataKey="late" name="Leaves" stroke="#10b981" strokeWidth={2} />
+                  <Tooltip labelFormatter={(d) => {
+                    try {
+                      const [Y,M,D] = String(d).split('-').map(Number);
+                      const dd = new Date(Y, (M||1)-1, D||1);
+                      return dd.toLocaleDateString('en-US');
+                    } catch { return d; }
+                  }} formatter={(value, name) => [value, name === 'late' ? 'Late' : name]} />
+                  <Line type="monotone" dataKey="late" name="Late" stroke="#10b981" strokeWidth={2} />
                 </LineChart>
               </ResponsiveContainer>
             </CardContent>
@@ -774,13 +831,77 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
                 </div>
               </div>
             )}
+            {/* Employee filters */}
+            {user?.role === 'employee' && (
+              <div className="flex items-center gap-3 flex-nowrap">
+                <div className="flex items-center gap-2">
+                  <label className="text-sm">Type:</label>
+                  <button
+                    className={`px-2 py-1 text-sm rounded border ${empType === 'daily' ? 'bg-primary text-white' : 'bg-transparent'}`}
+                    onClick={() => setEmpType('daily')}
+                    type="button"
+                  >Daily</button>
+                  <button
+                    className={`px-2 py-1 text-sm rounded border ${empType === 'monthly' ? 'bg-primary text-white' : 'bg-transparent'}`}
+                    onClick={() => setEmpType('monthly')}
+                    type="button"
+                  >Monthly</button>
+                </div>
+                <div>
+                  {empType === 'daily' ? (
+                    <input
+                      aria-label="Pick date"
+                      type="date"
+                      value={empPicker}
+                      onChange={(e) => setEmpPicker(e.target.value)}
+                      className="border rounded px-2 py-1 text-sm bg-white dark:bg-gray-900"
+                    />
+                  ) : (
+                    <input
+                      aria-label="Pick month"
+                      type="month"
+                      value={/^\d{4}-\d{2}$/.test(empPicker) ? empPicker : empPicker.slice(0,7)}
+                      onChange={(e) => setEmpPicker(e.target.value)}
+                      className="border rounded px-2 py-1 text-sm bg-white dark:bg-gray-900"
+                    />
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-sm">Status:</label>
+                  <select
+                    value={empStatus}
+                    onChange={(e) => setEmpStatus(e.target.value)}
+                    className="border rounded px-2 pr-6 py-1 text-sm min-w-[120px] bg-white dark:bg-gray-900"
+                  >
+                    <option value="all">All</option>
+                    <option value="present">Present</option>
+                    <option value="late">Late</option>
+                    <option value="absent">Absent</option>
+                  </select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-sm">Show</label>
+                  <select
+                    value={empEntriesPerPage}
+                    onChange={(e) => setEmpEntriesPerPage(Number(e.target.value))}
+                    className="border rounded px-2 pr-6 py-1 text-sm min-w-[72px] bg-white dark:bg-gray-900"
+                  >
+                    {[10, 25, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </div>
+              </div>
+            )}
           </div>
 
+          {/* Max height roughly equals 4 rows; vertical scroll when more */}
           <div className="overflow-x-auto overflow-y-auto max-h-56 md:max-h-72">
             <table className="w-full min-w-full sm:min-w-[700px] md:min-w-[900px] whitespace-nowrap">
               <thead>
                 <tr className="border-b border-gray-200 dark:border-gray-700 h-12">
                   <th className="text-left py-3 px-4 font-medium text-gray-900 dark:text-white">Employee</th>
+                  {isEmployee && (
+                    <th className="text-left py-3 px-4 font-medium text-gray-900 dark:text-white">Date</th>
+                  )}
                   <th className="text-left py-3 px-4 font-medium text-gray-900 dark:text-white">Check In</th>
                   <th className="text-left py-3 px-4 font-medium text-gray-900 dark:text-white">Check Out</th>
                   <th className="text-left py-3 px-4 font-medium text-gray-900 dark:text-white">Hours</th>
@@ -791,7 +912,7 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
               <tbody>
                 {(user?.role !== 'employee' && allAttendanceLoading) ? (
                   <tr>
-                    <td className="py-6 px-4 text-center text-sm text-gray-500 dark:text-gray-400" colSpan={6}>
+                    <td className="py-6 px-4 text-center text-sm text-gray-500 dark:text-gray-400" colSpan={isEmployee ? 7 : 6}>
                       Loading attendance...
                     </td>
                   </tr>
@@ -805,6 +926,9 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
                         <span className="font-medium">{record.name}</span>
                       </div>
                     </td>
+                    {isEmployee && (
+                      <td className="py-3 px-4 text-sm">{fmtUSDate(record.date)}</td>
+                    )}
                     <td className="py-3 px-4 text-sm">{record.checkIn}</td>
                     <td className="py-3 px-4 text-sm">{record.checkOut}</td>
                     <td className="py-3 px-4 text-sm">{record.hours}</td>
@@ -855,8 +979,9 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
                   const first = new Date(selectedYear, selectedMonth, 1);
                   const last = new Date(selectedYear, selectedMonth + 1, 0);
                   let present = 0, absent = 0, late = 0;
+                  const toKey = (dt) => `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`;
                   for (let d = new Date(first); d <= last; d.setDate(d.getDate() + 1)) {
-                    const key = d.toISOString().slice(0,10);
+                    const key = toKey(d);
                     const rec = map.get(key);
                     if (!rec) continue;
                     const status = (rec.status || '').toLowerCase();
@@ -941,30 +1066,44 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
                     {daysArray.map((day, idx) => {
                       if (day === null) return <div key={`pad-${idx}`} />;
                       const curr = new Date(selectedYear, selectedMonth, day);
-                      const key = curr.toISOString().slice(0,10);
+                      const toKey = (dt) => `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`;
+                      const key = toKey(curr);
                       const rec = map.get(key);
                       const status = (rec?.status || '').toLowerCase();
                       const color = status === 'present' ? 'bg-green-500' : status === 'late' ? 'bg-yellow-500' : status === 'absent' ? 'bg-red-500' : '';
-                      const isToday = key === new Date().toISOString().slice(0,10);
-                      // Compute hours text from available fields
+                      const isToday = key === toKey(new Date());
+                      // Compute hours text from available fields -> normalize to HH:MM:SS
                       const minutesFrom = (n) => {
                         const mins = Number(n);
                         return Number.isFinite(mins) ? mins : null;
                       };
-                      const formatMins = (mins) => {
-                        const h = Math.floor(mins / 60);
-                        const m = mins % 60;
-                        return `${h}h ${m}m`;
+                      const secondsFromDecimalHours = (h) => {
+                        const n = Number(h);
+                        return Number.isFinite(n) ? Math.max(0, Math.round(n * 3600)) : null;
                       };
-                      let hoursText = null;
-                      if (rec) {
-                        if (typeof rec.hours === 'string' && rec.hours.trim()) hoursText = rec.hours;
-                        else if (typeof rec.hoursWorked === 'string' && rec.hoursWorked.trim()) hoursText = rec.hoursWorked;
-                        else if (minutesFrom(rec.hoursWorkedMinutes) !== null) hoursText = formatMins(minutesFrom(rec.hoursWorkedMinutes));
-                        else if (minutesFrom(rec.totalMinutes) !== null) hoursText = formatMins(minutesFrom(rec.totalMinutes));
-                        else if (status === 'absent') hoursText = '0h 0m';
-                      }
-                      const title = rec ? (hoursText ? `Hours: ${hoursText}` : (status ? `Hours: 0h 0m` : 'No record')) : 'No record';
+                      const normalizeToHMS = (rec) => {
+                        // 1) If already formatted like HH:MM or HH:MM:SS
+                        if (typeof rec?.hours === 'string' && /\d{1,2}:\d{2}(:\d{2})?/.test(rec.hours)) {
+                          const parts = rec.hours.split(':');
+                          const hh = parts[0].padStart(2, '0');
+                          const mm = (parts[1] || '00').padStart(2, '0');
+                          const ss = (parts[2] || '00').padStart(2, '0');
+                          return `${hh}:${mm}:${ss}`;
+                        }
+                        // 2) Decimal hours in hoursWorked (string or number)
+                        const secFromHoursWorked = secondsFromDecimalHours(rec?.hoursWorked);
+                        if (secFromHoursWorked !== null) return formatSec(secFromHoursWorked);
+                        // 3) Minutes-based fields
+                        const mins1 = minutesFrom(rec?.hoursWorkedMinutes);
+                        if (mins1 !== null) return formatSec(mins1 * 60);
+                        const mins2 = minutesFrom(rec?.totalMinutes);
+                        if (mins2 !== null) return formatSec(mins2 * 60);
+                        // 4) Absent explicitly
+                        if ((rec?.status || '').toLowerCase() === 'absent') return '00:00:00';
+                        return null;
+                      };
+                      const hoursText = normalizeToHMS(rec);
+                      const title = rec ? (hoursText ? `Hours: ${hoursText}` : (status ? `Hours: 00:00:00` : 'No record')) : 'No record';
                       return (
                         <div
                           key={key}

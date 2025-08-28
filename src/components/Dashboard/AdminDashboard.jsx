@@ -116,12 +116,17 @@ const AdminDashboard = () => {
     { name: 'Jun', leaves: 22 },
   ];
 
-  const departmentData = [
-    { name: 'Engineering', value: 25, color: '#3b82f6' },
-    { name: 'HR', value: 8, color: '#10b981' },
-    { name: 'Finance', value: 12, color: '#f59e0b' },
-    { name: 'Admin', value: 5, color: '#ef4444' },
-  ];
+  // Build real Department Distribution from employees list
+  const departmentData = React.useMemo(() => {
+    const palette = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#84cc16', '#f43f5e'];
+    const map = new Map();
+    (safeEmployees).forEach(emp => {
+      const dept = (emp?.department || 'Unassigned').trim();
+      map.set(dept, (map.get(dept) || 0) + 1);
+    });
+    const entries = Array.from(map.entries());
+    return entries.map(([name, value], idx) => ({ name, value, color: palette[idx % palette.length] }));
+  }, [safeEmployees]);
 
   const upcomingBirthdays = [
     { name: 'John Doe', date: 'Aug 25', department: 'Engineering' },
