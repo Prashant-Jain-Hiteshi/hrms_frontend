@@ -143,6 +143,7 @@ export const DataProvider = ({ children }) => {
     { id: 3, employeeId: 'EMP003', name: 'Shubham Kumar', date: '2024-08-23', checkIn: '09:30', checkOut: '-', status: 'present', hours: '8h 30m' },
   ]);
   const [leaveRequests, setLeaveRequests] = useState([]);
+  const [leaveTypes, setLeaveTypes] = useState([]);
   const [tasks, setTasks] = useState([
     { id: 1, title: 'Complete Q3 Report', assignee: 'Admin User', priority: 'high', status: 'pending', dueDate: '2024-08-25' },
     { id: 2, title: 'Review Employee Performance', assignee: 'HR Manager', priority: 'medium', status: 'in_progress', dueDate: '2024-08-30' },
@@ -177,31 +178,21 @@ export const DataProvider = ({ children }) => {
 
   // Load employees and leave requests from backend on first mount
   useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        const res = await EmployeesAPI.list({ limit: 200, offset: 0 });
-        const data = res?.data?.rows || res?.data || [];
-        if (mounted && Array.isArray(data)) setEmployees(data);
-      } catch (e) {
-        // Fallback to mocks when API not available
-        if (mounted) setEmployees(MOCK_EMPLOYEES);
-      }
-
-      // Load leave requests from backend
-      try {
-        const leaveRes = await LeaveAPI.list();
-        const leaveData = leaveRes?.data || [];
-        if (mounted && Array.isArray(leaveData)) setLeaveRequests(leaveData);
-      } catch (e) {
-        // Keep empty array if API fails
-        if (mounted) setLeaveRequests([]);
-      }
-    })();
-    return () => {
-      mounted = false;
-    };
+    fetchEmployees();
+    fetchLeaveRequests();
+    fetchLeaveTypes();
   }, []);
+
+  const fetchEmployees = async () => {
+    try {
+      const res = await EmployeesAPI.list({ limit: 200, offset: 0 });
+      const data = res?.data?.rows || res?.data || [];
+      if (Array.isArray(data)) setEmployees(data);
+    } catch (e) {
+      // Fallback to mocks when API not available
+      setEmployees(MOCK_EMPLOYEES);
+    }
+  };
 
   const fetchAttendanceStatus = async (date) => {
     try {
@@ -461,32 +452,56 @@ export const DataProvider = ({ children }) => {
   // Load leave requests from backend
   const fetchLeaveRequests = async () => {
     try {
-      const { data } = await LeaveAPI.list();
-      setLeaveRequests(Array.isArray(data) ? data : []);
-      return data;
-    } catch (error) {
-      console.error('Failed to fetch leave requests:', error);
+      const res = await LeaveAPI.list();
+      const data = res?.data || [];
+      if (Array.isArray(data)) setLeaveRequests(data);
+    } catch (e) {
       setLeaveRequests([]);
-      return [];
     }
   };
 
-  // Get leave requests for approval (TO users)
+  const fetchLeaveTypes = async () => {
+    try {
+      const { data } = await LeaveAPI.leaveTypes.getAll();
+      setLeaveTypes(data || []);
+    } catch (error) {
+      console.error('Failed to fetch leave types:', error);
+      // Fallback to mock data
+      setLeaveTypes([
+        { id: 1, name: 'Annual Leave', numberOfLeaves: 20, description: 'Annual vacation leave', requiresApproval: true, carryForward: true, encashment: false, eligibility: 'all', isActive: true },
+        { id: 2, name: 'Sick Leave', numberOfLeaves: 10, description: 'Medical leave for illness', requiresApproval: false, carryForward: false, encashment: false, eligibility: 'all', isActive: true },
+        { id: 3, name: 'Casual Leave', numberOfLeaves: 5, description: 'Short-term personal leave', requiresApproval: true, carryForward: false, encashment: false, eligibility: 'all', isActive: true },
+        { id: 4, name: 'Maternity Leave', numberOfLeaves: 90, description: 'Maternity leave for new mothers', requiresApproval: true, carryForward: false, encashment: false, eligibility: 'female', isActive: true }
+      ]);
+    }
+  };
+
+  const fetchLeaveBalance = async () => {
+    try {
+      const { data } = await LeaveAPI.balance();
+      return data || {};
+    } catch (error) {
+      console.error('Failed to fetch leave balance:', error);
+      return {};
+    }
+  };
+
   const fetchLeaveRequestsForApproval = async () => {
     try {
-      const { data } = await LeaveAPI.forApproval();
-      return Array.isArray(data) ? data : [];
+      const res = await LeaveAPI.forApproval();
+      return res?.data || [];
     } catch (error) {
+      console.error('Failed to fetch leave requests for approval:', error);
       return [];
     }
   };
 
-  // Get leave requests where user is in CC
   const fetchLeaveRequestsForCC = async () => {
     try {
-      const { data } = await LeaveAPI.ccRequests();
-      return Array.isArray(data) ? data : [];
+      const res = await LeaveAPI.ccRequests();
+      return res?.data || [];
     } catch (error) {
+      console.error('Failed to fetch CC leave requests:', error);
       return [];
     }
   };
@@ -501,25 +516,69 @@ export const DataProvider = ({ children }) => {
     }
   };
 
-  // Task CRUD operations
-  const addTask = (taskData) => {
-    const newTask = {
-      ...taskData,
-      id: Date.now(),
-      status: 'pending'
-    };
+  // Leave Types CRUD
+  const addLeaveType = async (leaveTypeData) => {
+    try {
+      const res = await LeaveAPI.leaveTypes.create(leaveTypeData);
+      const newLeaveType = res?.data;
+      if (newLeaveType) {
+        setLeaveTypes(prev => [...prev, newLeaveType]);
+      }
+      return newLeaveType;
+    } catch (error) {
+      console.error('Failed to create leave type:', error);
+      throw error;
+    }
+  };
+
+  const updateLeaveType = async (id, updates) => {
+    try {
+      const res = await LeaveAPI.leaveTypes.update(id, updates);
+      const updatedLeaveType = res?.data;
+      if (updatedLeaveType) {
+        setLeaveTypes(prev => prev.map(type => type.id === id ? updatedLeaveType : type));
+      }
+      return updatedLeaveType;
+    } catch (error) {
+      console.error('Failed to update leave type:', error);
+      throw error;
+    }
+  };
+
+  const deleteLeaveType = async (id) => {
+    try {
+      await LeaveAPI.leaveTypes.delete(id);
+      setLeaveTypes(prev => prev.filter(type => type.id !== id));
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to delete leave type:', error);
+      throw error;
+    }
+  };
+
+  const searchLeaveTypes = async (searchTerm) => {
+    try {
+      const res = await LeaveAPI.leaveTypes.search(searchTerm);
+      return res?.data || [];
+    } catch (error) {
+      console.error('Failed to search leave types:', error);
+      return [];
+    }
+  };
+
+  // Tasks CRUD
+  const addTask = (task) => {
+    const newTask = { ...task, id: Date.now() };
     setTasks(prev => [...prev, newTask]);
     return newTask;
   };
 
-  const updateTask = (taskId, taskData) => {
-    setTasks(prev => prev.map(task => 
-      task.id === taskId ? { ...task, ...taskData } : task
-    ));
+  const updateTask = (id, updates) => {
+    setTasks(prev => prev.map(task => task.id === id ? { ...task, ...updates } : task));
   };
 
-  const deleteTask = (taskId) => {
-    setTasks(prev => prev.filter(task => task.id !== taskId));
+  const deleteTask = (id) => {
+    setTasks(prev => prev.filter(task => task.id !== id));
   };
 
   // Leave approval/rejection functions - Backend integrated
@@ -883,6 +942,15 @@ export const DataProvider = ({ children }) => {
     approveLeave,
     rejectLeave,
     cancelLeave,
+    
+    // Leave Types CRUD
+    leaveTypes,
+    fetchLeaveTypes,
+    fetchLeaveBalance,
+    addLeaveType,
+    updateLeaveType,
+    deleteLeaveType,
+    searchLeaveTypes,
     
     // Tasks CRUD
     tasks,

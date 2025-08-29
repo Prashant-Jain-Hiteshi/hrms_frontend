@@ -10,10 +10,11 @@ import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, 
 import { useAuth } from '../../contexts/AuthContext';
 import { useData } from '../../contexts/DataContext';
 import { LeaveAPI } from '../../lib/leaveApi';
+import LeaveTypes from './LeaveTypes';
 
 const LeaveManagement = () => {
   const { user } = useAuth();
-  const { leaveRequests, addLeaveRequest, approveLeave, rejectLeave, cancelLeave, employees } = useData();
+  const { leaveRequests, addLeaveRequest, approveLeave, rejectLeave, cancelLeave, employees, leaveTypes, fetchLeaveBalance } = useData();
   const [selectedTab, setSelectedTab] = useState('overview');
   const [searchTerm, setSearchTerm] = useState('');
   const [showApplyForm, setShowApplyForm] = useState(false);
@@ -25,6 +26,7 @@ const LeaveManagement = () => {
   // Role and tabs
   const role = String(user?.role || '').toLowerCase();
   const isHR = role === 'hr';
+  const isAdmin = role === 'admin';
   const tabs = isHR ? ['overview', 'mentions', 'policies'] : ['overview', 'requests', 'mentions', 'policies'];
 
   // simple toast helper
@@ -436,12 +438,31 @@ const LeaveManagement = () => {
     }
   };
 
-  const leaveBalance = {
+  // State for leave balance from backend
+  const [leaveBalance, setLeaveBalance] = useState({
     annual: { total: 20, used: 8, remaining: 12 },
     sick: { total: 10, used: 2, remaining: 8 },
     personal: { total: 5, used: 1, remaining: 4 },
     maternity: { total: 90, used: 0, remaining: 90 }
-  };
+  });
+
+  // Fetch leave balance from backend
+  useEffect(() => {
+    const loadLeaveBalance = async () => {
+      try {
+        const balance = await fetchLeaveBalance();
+        if (balance && Object.keys(balance).length > 0) {
+          setLeaveBalance(balance);
+        }
+      } catch (error) {
+        console.error('Failed to load leave balance:', error);
+      }
+    };
+
+    if (user?.employeeId) {
+      loadLeaveBalance();
+    }
+  }, [user?.employeeId, fetchLeaveBalance]);
 
   const filteredLeaveRequests = user?.role === 'employee' 
     ? leaveRequests.filter(request => 
@@ -563,7 +584,7 @@ const LeaveManagement = () => {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm font-medium text-gray-600 dark:text-gray-400 capitalize">
-                        {type} Leave
+                        {balance.displayName || type} 
                       </p>
                       <p className="text-2xl font-bold text-gray-900 dark:text-white">
                         {balance.remaining}
@@ -885,13 +906,26 @@ const LeaveManagement = () => {
                   onChange={(e) => setLeaveForm({...leaveForm, leaveType: e.target.value})}
                 >
                   <option value="">Select a leave type...</option>
-                  <option value="annual">Annual Leave</option>
-                  <option value="sick">Sick Leave</option>
-                  <option value="casual">Casual Leave</option>
-                  <option value="maternity">Maternity Leave</option>
-                  <option value="paternity">Paternity Leave</option>
-                  <option value="emergency">Emergency Leave</option>
-                  <option value="other">Other</option>
+                  {leaveTypes && leaveTypes.length > 0 ? (
+                    leaveTypes.map((leaveType) => {
+                      // Convert display name to backend enum value
+                      const backendValue = leaveType.name.toLowerCase().replace(/\s+leave$/i, '').replace(/\s+/g, '');
+                      return (
+                        <option key={leaveType.id} value={backendValue}>
+                          {leaveType.name}
+                        </option>
+                      );
+                    })
+                  ) : (
+                    <>
+                      <option value="annual">Annual Leave</option>
+                      <option value="sick">Sick Leave</option>
+                      <option value="casual">Casual Leave</option>
+                      <option value="maternity">Maternity Leave</option>
+                      <option value="paternity">Paternity Leave</option>
+                      <option value="emergency">Emergency Leave</option>
+                    </>
+                  )}
                 </select>
                 {formErrors.leaveType && (
                   <p className="text-red-500 text-xs mt-1">{formErrors.leaveType}</p>
@@ -928,7 +962,7 @@ const LeaveManagement = () => {
                     <option value="">Select employee to notify...</option>
                     {employees.filter(emp => !isSelfEmployee(emp)).map(employee => (
                       <option key={employee.id} value={employee.id}>
-                        {employee.name} - {employee.designation}
+                        {employee.name}
                       </option>
                     ))}
                   </select>
@@ -992,7 +1026,7 @@ const LeaveManagement = () => {
                       !leaveForm.ccEmployees.find(cc => cc.id === emp.id)
                     ).map(employee => (
                       <option key={employee.id} value={employee.id}>
-                        {employee.name} - {employee.designation}
+                        {employee.name}
                       </option>
                     ))}
                   </select>
@@ -1031,13 +1065,8 @@ const LeaveManagement = () => {
                     <Input 
                       type="date" 
                       value={leaveForm.startDate}
-                      onChange={(e) => {
-                        setLeaveForm({...leaveForm, startDate: e.target.value});
-                        if (formErrors.startDate) {
-                          setFormErrors({...formErrors, startDate: ''});
-                        }
-                      }}
-                      className={`w-full p-2 border rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-0 focus:border-2 ${
+                      onChange={(e) => setLeaveForm({...leaveForm, startDate: e.target.value})}
+                      className={`border rounded-lg bg-white dark:bg-gray-800 dark:text-white focus:ring-0 focus:border-2 focus:outline-none ${
                         formErrors.startDate 
                           ? 'border-red-500 focus:border-red-500' 
                           : 'border-gray-300 dark:border-gray-600 focus:border-blue-500'
@@ -1053,8 +1082,7 @@ const LeaveManagement = () => {
                       type="time" 
                       value={leaveForm.startTime}
                       onChange={(e) => setLeaveForm({...leaveForm, startTime: e.target.value})}
-                      className="!border-0 !outline-none bg-white dark:bg-gray-800 dark:text-white focus:ring-0 focus:!border-2 focus:!border-blue-500 focus:!outline-none"
-                      style={{border: 'none', outline: 'none'}}
+                      className="border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 dark:text-white focus:ring-0 focus:border-2 focus:border-blue-500 focus:outline-none"
                     />
                   </div>
                 </div>
@@ -1065,8 +1093,7 @@ const LeaveManagement = () => {
                       type="date" 
                       value={leaveForm.endDate}
                       onChange={(e) => setLeaveForm({...leaveForm, endDate: e.target.value})}
-                      className="!border-0 !outline-none bg-white dark:bg-gray-800 dark:text-white focus:ring-0 focus:!border-2 focus:!border-blue-500 focus:!outline-none"
-                      style={{border: 'none', outline: 'none'}}
+                      className="border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 dark:text-white focus:ring-0 focus:border-2 focus:border-blue-500 focus:outline-none"
                     />
                   </div>
                   <div>
@@ -1075,8 +1102,7 @@ const LeaveManagement = () => {
                       type="time" 
                       value={leaveForm.endTime}
                       onChange={(e) => setLeaveForm({...leaveForm, endTime: e.target.value})}
-                      className="!border-0 !outline-none bg-white dark:bg-gray-800 dark:text-white focus:ring-0 focus:!border-2 focus:!border-blue-500 focus:!outline-none"
-                      style={{border: 'none', outline: 'none'}}
+                      className="border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 dark:text-white focus:border-blue-500"
                     />
                   </div>
                 </div>
@@ -1231,6 +1257,67 @@ const LeaveManagement = () => {
               </Button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Policies Tab - Admin Only */}
+      {selectedTab === 'policies' && isAdmin && (
+        <div className="space-y-6">
+          <LeaveTypes />
+        </div>
+      )}
+
+      {/* Policies Tab - Non-Admin */}
+      {selectedTab === 'policies' && !isAdmin && (
+        <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Leave Policies</CardTitle>
+              <CardDescription>Company leave policies and guidelines</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <div>
+                  <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">General Leave Policy</h3>
+                  <ul className="space-y-2 text-gray-600 dark:text-gray-400">
+                    {leaveTypes && leaveTypes.length > 0 ? (
+                      leaveTypes.map((leaveType, index) => (
+                        <li key={leaveType.id || index}>
+                          • {leaveType.name}: {leaveType.numberOfLeaves} days per year
+                          {leaveType.description && (
+                            <span className="text-sm text-gray-500 dark:text-gray-500 ml-2">
+                              ({leaveType.description})
+                            </span>
+                          )}
+                        </li>
+                      ))
+                    ) : (
+                      <>
+                        <li>• Annual Leave: 20 days per year</li>
+                        <li>• Sick Leave: 10 days per year</li>
+                        <li>• Casual Leave: 5 days per year</li>
+                        <li>• Maternity Leave: 90 days</li>
+                      </>
+                    )}
+                    <li>• Leave requests must be submitted at least 2 days in advance</li>
+                    <li>• All leaves require manager approval</li>
+                    <li>• Unused annual leave can be carried forward up to 5 days</li>
+                  </ul>
+                </div>
+                
+                <div>
+                  <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">Leave Application Process</h3>
+                  <ol className="space-y-2 text-gray-600 dark:text-gray-400 list-decimal list-inside">
+                    <li>Submit leave request through the system</li>
+                    <li>Select appropriate approver (TO) and notify relevant colleagues (CC)</li>
+                    <li>Provide clear reason for leave</li>
+                    <li>Wait for approval from designated approver</li>
+                    <li>Check leave status in the requests section</li>
+                  </ol>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       )}
     </div>

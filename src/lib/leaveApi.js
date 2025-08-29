@@ -16,6 +16,9 @@ export const LeaveAPI = {
   // Get leave requests where current user is mentioned (TO or CC)
   mentions: () => api.get('/leave/mentions'),
 
+  // Get leave balance for current user
+  balance: () => api.get('/leave/balance'),
+
   // Get leave statistics
   statistics: (employeeId) => api.get('/leave/statistics', { params: { employeeId } }),
 
@@ -41,5 +44,32 @@ export const LeaveAPI = {
 
     // Get overall statistics (Admin only)
     getOverallStats: () => api.get('/leave/admin/statistics/all'),
+  },
+
+  // Leave Types Management (Admin only)
+  leaveTypes: {
+    // Get all leave types
+    getAll: (params = {}) => api.get('/leave-types', { params }),
+
+    // Get leave type by ID
+    getById: (id) => api.get(`/leave-types/${id}`),
+
+    // Create new leave type
+    create: (data) => api.post('/leave-types', data),
+
+    // Update leave type
+    update: (id, data) => api.put(`/leave-types/${id}`, data),
+
+    // Delete leave type
+    delete: (id) => api.delete(`/leave-types/${id}`),
+
+    // Toggle leave type status
+    toggleStatus: (id) => api.put(`/leave-types/${id}/toggle-status`),
+
+    // Search leave types
+    search: (searchTerm) => api.get('/leave-types', { params: { search: searchTerm } }),
+
+    // Get by eligibility
+    getByEligibility: (eligibility) => api.get('/leave-types', { params: { eligibility } }),
   },
 };
