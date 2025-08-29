@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { MOCK_EMPLOYEES, MOCK_DEPARTMENTS } from '../data/mockData';
 import { useAuth } from './AuthContext';
 import { EmployeesAPI, AttendanceAPI } from '../lib/api';
+import { LeaveAPI } from '../lib/leaveApi';
 
 const DataContext = createContext();
 
@@ -141,10 +142,7 @@ export const DataProvider = ({ children }) => {
     { id: 2, employeeId: 'EMP002', name: 'HR Manager', date: '2024-08-23', checkIn: '09:15', checkOut: '18:30', status: 'present', hours: '9h 15m' },
     { id: 3, employeeId: 'EMP003', name: 'Shubham Kumar', date: '2024-08-23', checkIn: '09:30', checkOut: '-', status: 'present', hours: '8h 30m' },
   ]);
-  const [leaveRequests, setLeaveRequests] = useState([
-    { id: 1, employeeId: 'EMP003', name: 'Shubham Kumar', type: 'Sick Leave', startDate: '2024-08-25', endDate: '2024-08-26', days: 2, status: 'pending', reason: 'Fever and cold' },
-    { id: 2, employeeId: 'EMP002', name: 'HR Manager', type: 'Vacation', startDate: '2024-09-01', endDate: '2024-09-05', days: 5, status: 'approved', reason: 'Family vacation' },
-  ]);
+  const [leaveRequests, setLeaveRequests] = useState([]);
   const [tasks, setTasks] = useState([
     { id: 1, title: 'Complete Q3 Report', assignee: 'Admin User', priority: 'high', status: 'pending', dueDate: '2024-08-25' },
     { id: 2, title: 'Review Employee Performance', assignee: 'HR Manager', priority: 'medium', status: 'in_progress', dueDate: '2024-08-30' },
@@ -177,7 +175,7 @@ export const DataProvider = ({ children }) => {
     });
   }, [employees, attendanceRecords, leaveRequests, tasks, departments]);
 
-  // Load employees from backend on first mount
+  // Load employees and leave requests from backend on first mount
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -188,6 +186,16 @@ export const DataProvider = ({ children }) => {
       } catch (e) {
         // Fallback to mocks when API not available
         if (mounted) setEmployees(MOCK_EMPLOYEES);
+      }
+
+      // Load leave requests from backend
+      try {
+        const leaveRes = await LeaveAPI.list();
+        const leaveData = leaveRes?.data || [];
+        if (mounted && Array.isArray(leaveData)) setLeaveRequests(leaveData);
+      } catch (e) {
+        // Keep empty array if API fails
+        if (mounted) setLeaveRequests([]);
       }
     })();
     return () => {
@@ -402,30 +410,95 @@ export const DataProvider = ({ children }) => {
     setAttendanceRecords(prev => prev.filter(record => record.id !== recordId));
   };
 
-  // Leave CRUD operations
-  const addLeaveRequest = (leaveData) => {
-    const newLeave = {
-      ...leaveData,
-      id: Date.now(),
-      status: 'pending'
-    };
-    setLeaveRequests(prev => {
-      const updated = [...prev, newLeave];
-      console.log('Leave request added:', newLeave);
-      console.log('Updated leave requests:', updated);
-      return updated;
-    });
-    return newLeave;
+  // Leave CRUD operations - Backend integrated
+  const addLeaveRequest = async (leaveData) => {
+    try {
+      const { data } = await LeaveAPI.create(leaveData);
+      setLeaveRequests(prev => [...prev, data]);
+      return data;
+    } catch (error) {
+      console.error('Failed to create leave request:', error);
+      throw error; // Re-throw to let component handle the error
+    }
   };
 
-  const updateLeaveRequest = (leaveId, leaveData) => {
-    setLeaveRequests(prev => prev.map(leave => 
-      leave.id === leaveId ? { ...leave, ...leaveData } : leave
-    ));
+  const updateLeaveRequest = async (leaveId, leaveData) => {
+    try {
+      const { data } = await LeaveAPI.updateStatus(leaveId, leaveData);
+      setLeaveRequests(prev => prev.map(leave => 
+        leave.id === leaveId ? { ...leave, ...data } : leave
+      ));
+      return data;
+    } catch (error) {
+      console.error('Failed to update leave request:', error);
+      throw error; // Re-throw to let component handle the error
+    }
   };
 
-  const deleteLeaveRequest = (leaveId) => {
-    setLeaveRequests(prev => prev.filter(leave => leave.id !== leaveId));
+  const deleteLeaveRequest = async (leaveId) => {
+    try {
+      await LeaveAPI.delete(leaveId);
+      setLeaveRequests(prev => prev.filter(leave => leave.id !== leaveId));
+    } catch (error) {
+      console.error('Failed to delete leave request:', error);
+      throw error; // Re-throw to let component handle the error
+    }
+  };
+
+  const cancelLeave = async (leaveId, comments = '') => {
+    try {
+      const { data } = await LeaveAPI.cancel(leaveId, { comments });
+      setLeaveRequests(prev => prev.map(leave => 
+        leave.id === leaveId ? { ...leave, ...data } : leave
+      ));
+      return data;
+    } catch (error) {
+      console.error('Failed to cancel leave request:', error);
+      throw error;
+    }
+  };
+
+  // Load leave requests from backend
+  const fetchLeaveRequests = async () => {
+    try {
+      const { data } = await LeaveAPI.list();
+      setLeaveRequests(Array.isArray(data) ? data : []);
+      return data;
+    } catch (error) {
+      console.error('Failed to fetch leave requests:', error);
+      setLeaveRequests([]);
+      return [];
+    }
+  };
+
+  // Get leave requests for approval (TO users)
+  const fetchLeaveRequestsForApproval = async () => {
+    try {
+      const { data } = await LeaveAPI.forApproval();
+      return Array.isArray(data) ? data : [];
+    } catch (error) {
+      return [];
+    }
+  };
+
+  // Get leave requests where user is in CC
+  const fetchLeaveRequestsForCC = async () => {
+    try {
+      const { data } = await LeaveAPI.ccRequests();
+      return Array.isArray(data) ? data : [];
+    } catch (error) {
+      return [];
+    }
+  };
+
+  // Mark CC leave request as read
+  const markLeaveAsRead = async (leaveId) => {
+    try {
+      await LeaveAPI.markAsRead(leaveId);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
   };
 
   // Task CRUD operations
@@ -449,17 +522,37 @@ export const DataProvider = ({ children }) => {
     setTasks(prev => prev.filter(task => task.id !== taskId));
   };
 
-  // Leave approval/rejection functions
-  const approveLeave = (leaveId) => {
-    setLeaveRequests(prev => prev.map(leave => 
-      leave.id === leaveId ? { ...leave, status: 'approved' } : leave
-    ));
+  // Leave approval/rejection functions - Backend integrated
+  const approveLeave = async (leaveId, comments = '') => {
+    try {
+      const { data } = await LeaveAPI.updateStatus(leaveId, { 
+        status: 'approved', 
+        comments 
+      });
+      setLeaveRequests(prev => prev.map(leave => 
+        leave.id === leaveId ? { ...leave, ...data } : leave
+      ));
+      return data;
+    } catch (error) {
+      console.error('Failed to approve leave request:', error);
+      throw error; // Re-throw to let component handle the error
+    }
   };
 
-  const rejectLeave = (leaveId) => {
-    setLeaveRequests(prev => prev.map(leave => 
-      leave.id === leaveId ? { ...leave, status: 'rejected' } : leave
-    ));
+  const rejectLeave = async (leaveId, comments = '') => {
+    try {
+      const { data } = await LeaveAPI.updateStatus(leaveId, { 
+        status: 'rejected', 
+        comments 
+      });
+      setLeaveRequests(prev => prev.map(leave => 
+        leave.id === leaveId ? { ...leave, ...data } : leave
+      ));
+      return data;
+    } catch (error) {
+      console.error('Failed to reject leave request:', error);
+      throw error; // Re-throw to let component handle the error
+    }
   };
 
   // Quick actions for dashboard
@@ -783,8 +876,13 @@ export const DataProvider = ({ children }) => {
     addLeaveRequest,
     updateLeaveRequest,
     deleteLeaveRequest,
+    fetchLeaveRequests,
+    fetchLeaveRequestsForApproval,
+    fetchLeaveRequestsForCC,
+    markLeaveAsRead,
     approveLeave,
     rejectLeave,
+    cancelLeave,
     
     // Tasks CRUD
     tasks,
