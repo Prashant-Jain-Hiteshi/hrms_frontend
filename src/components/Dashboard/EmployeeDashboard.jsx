@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
@@ -10,6 +10,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { getDashboardStats, MOCK_ANNOUNCEMENTS } from '../../data/mockData';
 import { useData } from '../../contexts/DataContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { LeaveAPI } from '../../lib/api';
 
 const EmployeeDashboard = () => {
   const navigate = useNavigate();
@@ -17,11 +18,33 @@ const EmployeeDashboard = () => {
   const { leaveRequests, tasks, myAttendance, fetchMyAttendance } = useData();
   const stats = getDashboardStats('employee');
 
+  // DOJ-based leave balance state
+  const [leaveBalanceMap, setLeaveBalanceMap] = useState({});
+  const [leaveBalanceLoading, setLeaveBalanceLoading] = useState(false);
+
   // Load my attendance for current month (for today status and month count)
   useEffect(() => {
     const from = new Date();
     from.setDate(1);
     fetchMyAttendance({ from: from.toISOString().slice(0, 10) });
+  }, []);
+
+  // Fetch DOJ-based leave balance
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        setLeaveBalanceLoading(true);
+        const res = await LeaveAPI.myBalance();
+        const data = res?.data || {};
+        if (mounted) setLeaveBalanceMap(data);
+      } catch (e) {
+        // no-op; keep UI resilient
+      } finally {
+        if (mounted) setLeaveBalanceLoading(false);
+      }
+    })();
+    return () => { mounted = false; };
   }, []);
 
   // Get employee-specific data
@@ -41,8 +64,21 @@ const EmployeeDashboard = () => {
   });
   const myTasks = tasks.filter(task => task.assignee === user?.name);
 
-  // Calculate employee stats
-  const myLeaveBalance = 25 - myLeaveRequests.filter(req => req.status === 'approved').reduce((sum, req) => sum + req.days, 0);
+  // Calculate employee stats from DOJ-based balance
+  const totals = Object.values(leaveBalanceMap || {}).reduce(
+    (acc, v) => {
+      const item = v || {};
+      const total = Number(item.total || 0);
+      const used = Number(item.used || 0);
+      const remaining = Number(item.remaining || Math.max(0, total - used));
+      acc.total += total;
+      acc.used += used;
+      acc.remaining += remaining;
+      return acc;
+    },
+    { total: 0, used: 0, remaining: 0 }
+  );
+  const myLeaveBalance = Number(totals.remaining.toFixed(2));
   // Present this month: any day with a check-in (includes 'present' and 'late')
   const attendanceThisMonth = myAttendanceThisMonth.filter(rec => !!rec.checkIn).length;
   const today = new Date().toISOString().slice(0, 10);
@@ -83,8 +119,8 @@ const EmployeeDashboard = () => {
   const attendanceData = weeks;
 
   const leaveBalanceData = [
-    { name: 'Used', value: 7, color: '#ef4444' },
-    { name: 'Available', value: 18, color: '#10b981' },
+    { name: 'Used', value: Number(totals.used.toFixed(2)), color: '#ef4444' },
+    { name: 'Available', value: Number(totals.remaining.toFixed(2)), color: '#10b981' },
   ];
 
   const recentPayslips = [

@@ -19,6 +19,11 @@ export const LeaveAPI = {
   // Get leave balance for current user
   balance: () => api.get('/leave/balance'),
 
+  // Get monthly ledger (deducted and LWP by month) for a date range
+  // Admin/HR can optionally pass employeeId; others default to self
+  monthlyLedger: ({ from, to, employeeId } = {}) =>
+    api.get('/leave/monthly-ledger', { params: { ...(from ? { from } : {}), ...(to ? { to } : {}), ...(employeeId ? { employeeId } : {}) } }),
+
   // Get leave statistics
   statistics: (employeeId) => api.get('/leave/statistics', { params: { employeeId } }),
 

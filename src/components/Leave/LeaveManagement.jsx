@@ -10,11 +10,13 @@ import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, 
 import { useAuth } from '../../contexts/AuthContext';
 import { useData } from '../../contexts/DataContext';
 import { LeaveAPI } from '../../lib/leaveApi';
+import { AttendanceAPI } from '../../lib/api';
+import { CalendarAPI } from '../../lib/api';
 import LeaveTypes from './LeaveTypes';
 
 const LeaveManagement = () => {
   const { user } = useAuth();
-  const { leaveRequests, addLeaveRequest, approveLeave, rejectLeave, cancelLeave, employees, leaveTypes, fetchLeaveBalance } = useData();
+  const { leaveRequests, addLeaveRequest, approveLeave, rejectLeave, cancelLeave, employees, leaveTypes, fetchLeaveBalance, myAttendance, monthlyCreditTotal, monthlyCreditAnnual } = useData();
   const [selectedTab, setSelectedTab] = useState('overview');
   const [searchTerm, setSearchTerm] = useState('');
   const [showApplyForm, setShowApplyForm] = useState(false);
@@ -23,11 +25,28 @@ const LeaveManagement = () => {
   const [mentions, setMentions] = useState([]);
   const [notifications, setNotifications] = useState([]);
 
+  // Calendar tab state (Admin)
+  const [calMonth, setCalMonth] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  });
+  const [weekends, setWeekends] = useState([]); // [0..6]
+  const [holidays, setHolidays] = useState([]); // list of { id, date, name, type }
+  const [workingDays, setWorkingDays] = useState(null);
+  const [savingWeekend, setSavingWeekend] = useState(false);
+  const [savingHoliday, setSavingHoliday] = useState(false);
+  const [newHoliday, setNewHoliday] = useState({ date: '', name: '', type: 'public' });
+
   // Role and tabs
   const role = String(user?.role || '').toLowerCase();
   const isHR = role === 'hr';
   const isAdmin = role === 'admin';
-  const tabs = isHR ? ['overview', 'mentions', 'policies'] : ['overview', 'requests', 'mentions', 'policies'];
+  const tabs = (() => {
+    if (isHR) return ['overview', 'mentions', 'policies'];
+    if (role === 'employee') return ['overview', 'requests', 'mentions', 'leavebalance', 'policies'];
+    // Admin and other roles: no Leave Balance
+    return ['overview', 'requests', 'mentions', 'policies', 'calendar'];
+  })();
 
   // simple toast helper
   const notify = ({ type = 'info', message = '', timeout = 3000 }) => {
@@ -37,6 +56,91 @@ const LeaveManagement = () => {
       setTimeout(() => {
         setNotifications((prev) => prev.filter((n) => n.id !== id));
       }, timeout);
+    }
+  };
+
+  // Calendar data fetchers
+  const fetchWeekends = async () => {
+    try {
+      const { data } = await CalendarAPI.weekends.get();
+      setWeekends(Array.isArray(data?.weekends) ? data.weekends : []);
+    } catch (e) {
+      notify({ type: 'error', message: 'Failed to load weekend settings' });
+    }
+  };
+
+  const fetchHolidays = async () => {
+    try {
+      const { data } = await CalendarAPI.holidays.list({ month: calMonth });
+      setHolidays(Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []));
+    } catch (e) {
+      notify({ type: 'error', message: 'Failed to load holidays' });
+    }
+  };
+
+  const fetchWorking = async () => {
+    try {
+      const { data } = await CalendarAPI.workingDays.monthly({ month: calMonth });
+      setWorkingDays(typeof data?.workingDays === 'number' ? data.workingDays : null);
+    } catch (e) {
+      setWorkingDays(null);
+    }
+  };
+
+  useEffect(() => {
+    if (selectedTab === 'calendar' && isAdmin) {
+      fetchWeekends();
+      fetchHolidays();
+      fetchWorking();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTab, calMonth, isAdmin]);
+
+  const toggleWeekend = (d) => {
+    setWeekends((prev) => prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d].sort((a,b)=>a-b));
+  };
+
+  const saveWeekends = async () => {
+    setSavingWeekend(true);
+    try {
+      await CalendarAPI.weekends.update({ weekends });
+      notify({ type: 'success', message: 'Weekend settings saved' });
+      fetchWorking();
+    } catch {
+      notify({ type: 'error', message: 'Failed to save weekends' });
+    } finally {
+      setSavingWeekend(false);
+    }
+  };
+
+  const addHoliday = async (e) => {
+    e?.preventDefault?.();
+    if (!newHoliday.date || !newHoliday.name) {
+      notify({ type: 'warning', message: 'Holiday date and name are required' });
+      return;
+    }
+    setSavingHoliday(true);
+    try {
+      await CalendarAPI.holidays.create({ ...newHoliday });
+      setNewHoliday({ date: '', name: '', type: 'public' });
+      notify({ type: 'success', message: 'Holiday added' });
+      fetchHolidays();
+      fetchWorking();
+    } catch {
+      notify({ type: 'error', message: 'Failed to add holiday' });
+    } finally {
+      setSavingHoliday(false);
+    }
+  };
+
+  const deleteHoliday = async (id) => {
+    try {
+      await CalendarAPI.holidays.remove(id);
+      notify({ type: 'success', message: 'Holiday removed' });
+      fetchHolidays();
+      fetchWorking();
+    } catch {
+      notify({ type: 'error', message: 'Failed to remove holiday' });
     }
   };
   // Determine if the leave belongs to the current user
@@ -79,6 +183,13 @@ const LeaveManagement = () => {
       setSelectedTab('overview');
     }
   }, [isHR, selectedTab]);
+
+  // Prevent non-employees (HR/Admin) from accessing Leave Balance tab
+  useEffect(() => {
+    if (selectedTab === 'leavebalance' && role !== 'employee') {
+      setSelectedTab('overview');
+    }
+  }, [selectedTab, role]);
 
   // Helpers
   const formatDateTime = (dateStr, timeStr) => {
@@ -136,6 +247,9 @@ const LeaveManagement = () => {
     }
     return out;
   };
+
+
+  
 
   const normalizeListToIdStrings = (list) => {
     if (!list) return [];
@@ -216,6 +330,26 @@ const LeaveManagement = () => {
     const date = req?.appliedDate || req?.appliedOn || req?.createdAt || req?.created_at || req?.createdDate;
     const time = req?.appliedTime || req?.applied_time || undefined;
     return formatDateTime(date, time);
+  };
+
+  // Compute total applied days (inclusive) from start/end; fallback to request.days if present
+  const getAppliedDays = (req) => {
+    const fallback = Number(req?.days);
+    if (!Number.isNaN(fallback) && fallback > 0) return fallback;
+    const s = req?.startDate || req?.start_date;
+    const e = req?.endDate || req?.end_date || s;
+    if (!s) return 0;
+    try {
+      const sd = new Date(s);
+      const ed = new Date(e);
+      // Zero-out times to avoid DST/timezone drift
+      sd.setHours(0,0,0,0);
+      ed.setHours(0,0,0,0);
+      const diff = Math.round((ed - sd) / (24 * 60 * 60 * 1000));
+      return (diff >= 0 ? diff + 1 : 1);
+    } catch {
+      return fallback || 0;
+    }
   };
 
   const resolveNames = (list) => {
@@ -313,6 +447,23 @@ const LeaveManagement = () => {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+  // Export ledger (Leave Balance) CSV
+  const generateLedgerCSV = (rows) => {
+    const headers = [
+      'Month', 'Opening', 'Monthly Credit', 'Extra Credit', 'Deducted', 'LWP', 'Closing',
+      'Present', 'Absent', 'Effective Present', 'Effective Absent', 'Paid Days'
+    ];
+    const dataRows = rows.map(r => [
+      r.label, r.opening, r.monthlyCredit, r.extraCredit, r.deducted, r.lwp, r.closing,
+      r.present, r.absent, r.effPresent, r.effAbsent, r.paidDays
+    ]);
+    return [headers, ...dataRows].map(row => row.join(',')).join('\n');
+  };
+  const handleExportLedger = () => {
+    const csvContent = generateLedgerCSV(ledgerRows);
+    const filename = `leave_balance_${new Date().toISOString().split('T')[0]}.csv`;
+    downloadCSV(csvContent, filename);
   };
   const [leaveForm, setLeaveForm] = useState({
     leaveType: '',
@@ -514,6 +665,204 @@ const LeaveManagement = () => {
     { month: 'Jun', approved: 22, pending: 3, rejected: 1 }
   ];
 
+  // =====================
+  // Leave Balance (Ledger)
+  // =====================
+  const [ledgerRange, setLedgerRange] = useState({
+    from: (() => { const d = new Date(); d.setMonth(0, 1); return d.toISOString().slice(0,10); })(), // Jan 1 current year
+    to: (() => { const d = new Date(); const last = new Date(d.getFullYear(), 11, 31); return last.toISOString().slice(0,10); })(), // Dec 31 current year
+  });
+
+  const [extraCreditsByMonth, setExtraCreditsByMonth] = useState({}); // { '2025-03': 0.5, ... }
+
+  // Backend monthly ledger (deducted and LWP per month)
+  const [backendLedger, setBackendLedger] = useState({}); // { 'yyyy-mm': { deducted, lwp } }
+  const [backendLedgerLoading, setBackendLedgerLoading] = useState(false);
+  // Attendance for ledger range (backend)
+  const [backendAttendance, setBackendAttendance] = useState([]);
+  const [backendAttendanceLoading, setBackendAttendanceLoading] = useState(false);
+
+  // Fetch backend attendance for the selected ledger range
+  useEffect(() => {
+    if (selectedTab !== 'leavebalance') return;
+    const loadAttendance = async () => {
+      try {
+        setBackendAttendanceLoading(true);
+        const params = { from: ledgerRange.from, to: ledgerRange.to };
+        const res = await AttendanceAPI.my(params);
+        const rows = Array.isArray(res?.data) ? res.data : Array.isArray(res?.data?.rows) ? res.data.rows : [];
+        setBackendAttendance(rows);
+      } catch (e) {
+        setBackendAttendance([]);
+      } finally {
+        setBackendAttendanceLoading(false);
+      }
+    };
+    loadAttendance();
+  }, [selectedTab, ledgerRange.from, ledgerRange.to]);
+
+  // Helper: yyyy-mm key
+  const ymKey = (dateStr) => {
+    try { const d = new Date(dateStr); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; } catch { return String(dateStr).slice(0,7); }
+  };
+
+  const getMonthsInRange = (from, to) => {
+    // Normalize to first of month at 00:00 local to avoid timezone drift
+    const startSrc = new Date(from);
+    const endSrc = new Date(to);
+    const start = new Date(startSrc.getFullYear(), startSrc.getMonth(), 1, 0, 0, 0, 0);
+    const endInput = new Date(endSrc.getFullYear(), endSrc.getMonth(), 1, 0, 0, 0, 0);
+    // Cap to current month (exclude future months)
+    const now = new Date();
+    const endCap = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+    const end = endInput > endCap ? endCap : endInput;
+    const out = [];
+    let d = new Date(start);
+    while (d.getTime() <= end.getTime()) {
+      out.push({
+        ym: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`,
+        label: d.toLocaleString(undefined, { month: 'short', year: 'numeric' })
+      });
+      d = new Date(d.getFullYear(), d.getMonth() + 1, 1, 0, 0, 0, 0);
+    }
+    return out;
+  };
+
+  // Fetch backend monthly ledger when on Leave Balance tab or date changes
+  useEffect(() => {
+    if (selectedTab !== 'leavebalance') return;
+    const load = async () => {
+      try {
+        setBackendLedgerLoading(true);
+        const res = await LeaveAPI.monthlyLedger({ from: ledgerRange.from, to: ledgerRange.to });
+        const data = Array.isArray(res?.data) ? res.data : [];
+        const map = {};
+        for (const it of data) {
+          const keyRaw = it?.ym || it?.month || it?.monthKey || it?.key || it?.date;
+          const key = typeof keyRaw === 'string' ? keyRaw.slice(0,7) : undefined;
+          if (!key) continue;
+          const deducted = Number(it?.deducted ?? it?.paid ?? it?.paidDays ?? 0);
+          const lwp = Number(it?.lwp ?? it?.unpaid ?? it?.unpaidDays ?? 0);
+          map[key] = {
+            deducted: Number.isFinite(deducted) ? Number(deducted.toFixed(2)) : 0,
+            lwp: Number.isFinite(lwp) ? Number(lwp.toFixed(2)) : 0,
+          };
+        }
+        setBackendLedger(map);
+      } catch (e) {
+        setBackendLedger({});
+      } finally {
+        setBackendLedgerLoading(false);
+      }
+    };
+    load();
+  }, [selectedTab, ledgerRange.from, ledgerRange.to]);
+
+  // Approx monthly credit: sum of configured monthly accruals if available in leaveTypes.numberOfLeaves / 12
+  const estimateMonthlyCredit = () => {
+    try {
+      if (Array.isArray(leaveTypes) && leaveTypes.length > 0) {
+        const annualTotals = leaveTypes
+          .filter(t => typeof t.numberOfLeaves === 'number')
+          .reduce((sum, t) => sum + Number(t.numberOfLeaves || 0), 0);
+        const m = annualTotals / 12;
+        return Number.isFinite(m) ? Number(m.toFixed(2)) : 0;
+      }
+      // Fallback: assume 1.5 per month (e.g., 18/year)
+      return 1.5;
+    } catch { return 0; }
+  };
+
+  const getApprovedLeavesByMonth = () => {
+    const map = {};
+    for (const req of leaveRequests) {
+      if (!req || String(req.status).toLowerCase() !== 'approved') continue;
+      const days = Number(req.days) || getAppliedDays(req) || 0;
+      const key = ymKey(req.startDate || req.createdAt || req.created_at || new Date());
+      map[key] = (map[key] || 0) + days;
+    }
+    return map; // paid leaves only (deducted)
+  };
+
+  const getLwpByMonth = () => {
+    const map = {};
+    for (const req of leaveRequests) {
+      if (!req || String(req.status).toLowerCase() !== 'approved') continue;
+      const t = String(req.type || req.leaveType || req.leave_type || '').toLowerCase();
+      if (t !== 'lwp' && t !== 'leave without pay' && t !== 'leavewithoutpay') continue;
+      const days = Number(req.days) || getAppliedDays(req) || 0;
+      const key = ymKey(req.startDate || req.createdAt || req.created_at || new Date());
+      map[key] = (map[key] || 0) + days;
+    }
+    return map;
+  };
+
+  const getAttendanceCountsByMonth = () => {
+    const map = {};
+    for (const rec of backendAttendance || []) {
+      const key = ymKey(rec.date);
+      const status = String(rec.status || '').toLowerCase();
+      if (!map[key]) map[key] = { present: 0, absent: 0 };
+      // Treat 'late' as present for Leave Balance display
+      if (status === 'present' || status === 'late') map[key].present += 1;
+      else if (status === 'absent') map[key].absent += 1;
+    }
+    return map;
+  };
+
+  const buildLedger = () => {
+    const months = getMonthsInRange(ledgerRange.from, ledgerRange.to);
+    const now = new Date();
+    const currentYm = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+    const monthlyCredit = (
+      Number(monthlyCreditAnnual) > 0
+        ? Number(monthlyCreditAnnual)
+        : (Number(monthlyCreditTotal) > 0 ? Number(monthlyCreditTotal) : estimateMonthlyCredit())
+    );
+    const deductedMap = getApprovedLeavesByMonth();
+    const lwpMap = getLwpByMonth();
+    const attMap = getAttendanceCountsByMonth();
+
+    // Opening from zero and accumulate; if backend provides opening, we can replace
+    let opening = 0;
+    const rows = months.map(({ ym, label }) => {
+      const be = backendLedger[ym] || {};
+      const deducted = Number(
+        (be.deducted !== undefined ? be.deducted : (deductedMap[ym] || 0))
+      );
+      const lwp = Number(
+        (be.lwp !== undefined ? be.lwp : (lwpMap[ym] || 0))
+      );
+      const extra = Number(extraCreditsByMonth[ym] || 0);
+      const credit = monthlyCredit + extra;
+      const closing = Number((opening + credit - deducted - lwp).toFixed(2));
+      const present = Number(attMap[ym]?.present || 0);
+      const absent = Number(attMap[ym]?.absent || 0);
+      const effPresent = present; // placeholder; can incorporate WFH/half-days if available
+      const effAbsent = absent;   // placeholder
+      const paidDays = present + deducted; // present days + paid leaves
+
+      // For the current month, show only actual activity and leave accrual/closing blank
+      const isCurrent = ym === currentYm;
+      const row = {
+        ym, label,
+        opening: Number(opening.toFixed(2)),
+        monthlyCredit: isCurrent ? '-' : Number(monthlyCredit.toFixed(2)),
+        extraCredit: isCurrent ? '-' : Number(extra.toFixed(2)),
+        deducted: Number(deducted.toFixed(2)),
+        lwp: Number(lwp.toFixed(2)),
+        closing: isCurrent ? '-' : closing,
+        present, absent, effPresent, effAbsent, paidDays,
+      };
+      // Carry opening forward using numeric closing; for current month, still advance opening numerically for downstream, but keep display blank
+      opening = closing;
+      return row;
+    });
+    return rows;
+  };
+
+  const ledgerRows = buildLedger();
+
   return (
     <div className="space-y-6">
       {/* Toast Notifications */}
@@ -554,6 +903,8 @@ const LeaveManagement = () => {
             <span>Apply Leave</span>
           </Button>
         )}
+
+      {/* (Leave Balance moved below with other tabs) */}
       </div>
 
       {/* Tabs */}
@@ -572,6 +923,211 @@ const LeaveManagement = () => {
           </button>
         ))}
       </div>
+
+      {/* Leave Balance Tab (Employee only) */}
+      {selectedTab === 'leavebalance' && role === 'employee' && (
+        <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Leave Balance</CardTitle>
+              <CardDescription>Monthly ledger for the selected period</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">From</label>
+                  <Input
+                    type="date"
+                    value={ledgerRange.from}
+                    onChange={(e) => setLedgerRange(r => ({ ...r, from: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">To</label>
+                  <Input
+                    type="date"
+                    value={ledgerRange.to}
+                    onChange={(e) => setLedgerRange(r => ({ ...r, to: e.target.value }))}
+                  />
+                </div>
+                <div className="flex items-end gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      const d = new Date();
+                      const from = new Date(d.getFullYear(), 0, 1).toISOString().slice(0,10);
+                      const to = new Date(d.getFullYear(), 11, 31).toISOString().slice(0,10);
+                      setLedgerRange({ from, to });
+                    }}
+                  >Current Year</Button>
+                  <Button variant="outline" onClick={handleExportLedger}>Export</Button>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+                      <th className="text-left py-3 px-4">Month</th>
+                      <th className="text-left py-3 px-4">Opening</th>
+                      <th className="text-left py-3 px-4">Monthly Credit</th>
+                      <th className="text-left py-3 px-4">Extra Credit</th>
+                      <th className="text-left py-3 px-4">Deducted</th>
+                      <th className="text-left py-3 px-4">LWP</th>
+                      <th className="text-left py-3 px-4">Closing</th>
+                      <th className="text-left py-3 px-4">Present</th>
+                      <th className="text-left py-3 px-4">Absent</th>
+                      <th className="text-left py-3 px-4">Effective Present</th>
+                      <th className="text-left py-3 px-4">Effective Absent</th>
+                      <th className="text-left py-3 px-4">Paid Days</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ledgerRows.length === 0 && (
+                      <tr>
+                        <td colSpan={12} className="py-8 px-4 text-center text-gray-500">No data</td>
+                      </tr>
+                    )}
+                    {ledgerRows.map((row) => (
+                      <tr key={row.ym} className="border-b border-gray-100 dark:border-gray-800">
+                        <td className="py-3 px-4 whitespace-nowrap">{row.label}</td>
+                        <td className="py-3 px-4">{row.opening}</td>
+                        <td className="py-3 px-4">{row.monthlyCredit}</td>
+                        <td className="py-3 px-4">{row.extraCredit}</td>
+                        <td className="py-3 px-4">{row.deducted}</td>
+                        <td className="py-3 px-4">{row.lwp}</td>
+                        <td className="py-3 px-4 font-medium">{row.closing}</td>
+                        <td className="py-3 px-4">{row.present}</td>
+                        <td className="py-3 px-4">{row.absent}</td>
+                        <td className="py-3 px-4">{row.effPresent}</td>
+                        <td className="py-3 px-4">{row.effAbsent}</td>
+                        <td className="py-3 px-4">{row.paidDays}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Calendar Tab (Admin only) */}
+      {selectedTab === 'calendar' && isAdmin && (
+        <div className="space-y-6">
+          {/* Month selector and working days */}
+          <div className="flex flex-wrap items-end gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Month</label>
+              <input
+                type="month"
+                value={calMonth}
+                onChange={(e) => setCalMonth(e.target.value)}
+                className="border rounded px-3 py-2"
+              />
+            </div>
+            <div className="ml-auto">
+              <div className="text-sm text-gray-600">Effective Working Days</div>
+              <div className="text-2xl font-semibold">{workingDays ?? '-'}</div>
+            </div>
+          </div>
+
+          {/* Weekend configuration */}
+          <div className="p-4 border rounded-lg">
+            <div className="font-semibold mb-3">Weekend Configuration</div>
+            <div className="flex flex-wrap gap-3">
+              {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((lbl, idx) => (
+                <label key={idx} className="inline-flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={weekends.includes(idx)}
+                    onChange={() => toggleWeekend(idx)}
+                  />
+                  <span>{lbl}</span>
+                </label>
+              ))}
+            </div>
+            <button
+              onClick={saveWeekends}
+              disabled={savingWeekend}
+              className="mt-3 px-4 py-2 bg-primary text-white rounded disabled:opacity-60"
+            >
+              {savingWeekend ? 'Saving...' : 'Save Weekends'}
+            </button>
+          </div>
+
+          {/* Holidays CRUD */}
+          <div className="p-4 border rounded-lg space-y-4">
+            <div className="font-semibold">Holidays</div>
+            <form onSubmit={addHoliday} className="grid grid-cols-1 md:grid-cols-4 gap-3">
+              <input
+                type="date"
+                value={newHoliday.date}
+                onChange={(e) => setNewHoliday((h) => ({ ...h, date: e.target.value }))}
+                className="border rounded px-3 py-2"
+              />
+              <input
+                type="text"
+                placeholder="Holiday name"
+                value={newHoliday.name}
+                onChange={(e) => setNewHoliday((h) => ({ ...h, name: e.target.value }))}
+                className="border rounded px-3 py-2"
+              />
+              <select
+                value={newHoliday.type}
+                onChange={(e) => setNewHoliday((h) => ({ ...h, type: e.target.value }))}
+                className="border rounded px-3 py-2"
+              >
+                <option value="public">Public</option>
+                <option value="restricted">Restricted</option>
+                <option value="optional">Optional</option>
+              </select>
+              <button
+                type="submit"
+                disabled={savingHoliday}
+                className="px-4 py-2 bg-primary text-white rounded disabled:opacity-60"
+              >
+                {savingHoliday ? 'Adding...' : 'Add Holiday'}
+              </button>
+            </form>
+
+            <div className="overflow-auto">
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr className="text-left border-b">
+                    <th className="py-2 pr-4">Date</th>
+                    <th className="py-2 pr-4">Name</th>
+                    <th className="py-2 pr-4">Type</th>
+                    <th className="py-2">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {holidays.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="py-3 text-gray-500">No holidays for this month</td>
+                    </tr>
+                  )}
+                  {holidays.map((h) => (
+                    <tr key={h.id} className="border-b">
+                      <td className="py-2 pr-4">{h.date}</td>
+                      <td className="py-2 pr-4">{h.name}</td>
+                      <td className="py-2 pr-4 capitalize">{h.type || 'public'}</td>
+                      <td className="py-2">
+                        <button
+                          onClick={() => deleteHoliday(h.id)}
+                          className="px-3 py-1 bg-red-500 text-white rounded"
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Overview Tab */}
       {selectedTab === 'overview' && (
@@ -676,6 +1232,7 @@ const LeaveManagement = () => {
                     <tr className="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
                       <th className="text-left py-4 px-6 font-medium text-gray-900 dark:text-white">Employee</th>
                       <th className="text-left py-4 px-6 font-medium text-gray-900 dark:text-white">Type</th>
+                      <th className="text-left py-4 px-6 font-medium text-gray-900 dark:text-white">Applied Day</th>
                       <th className="text-left py-4 px-6 font-medium text-gray-900 dark:text-white">Duration</th>
                       <th className="text-left py-4 px-6 font-medium text-gray-900 dark:text-white">Applied</th>
                       <th className="text-left py-4 px-6 font-medium text-gray-900 dark:text-white">Status</th>
@@ -703,6 +1260,12 @@ const LeaveManagement = () => {
                             </div>
                           </td>
                           <td className="py-4 px-6 text-sm text-gray-600 dark:text-gray-400">{getLeaveType(request)}</td>
+                          <td className="py-4 px-6 text-sm text-gray-600 dark:text-gray-400">
+                            {(() => {
+                              const d = getAppliedDays(request);
+                              return `${d} day${d === 1 ? '' : 's'}`;
+                            })()}
+                          </td>
                           <td className="py-4 px-6">
                             <div className="text-sm text-gray-600 dark:text-gray-400">
                               <div>{request.startDate} to {request.endDate}</div>
@@ -798,6 +1361,7 @@ const LeaveManagement = () => {
                     <tr className="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
                       <th className="text-left py-4 px-6 font-medium text-gray-900 dark:text-white">Employee</th>
                       <th className="text-left py-4 px-6 font-medium text-gray-900 dark:text-white">Type</th>
+                      <th className="text-left py-4 px-6 font-medium text-gray-900 dark:text-white">Applied Day</th>
                       <th className="text-left py-4 px-6 font-medium text-gray-900 dark:text-white">Duration</th>
                       <th className="text-left py-4 px-6 font-medium text-gray-900 dark:text-white">Applied</th>
                       <th className="text-left py-4 px-6 font-medium text-gray-900 dark:text-white">Status</th>
@@ -818,6 +1382,12 @@ const LeaveManagement = () => {
                           </div>
                         </td>
                         <td className="py-4 px-6 text-sm text-gray-600 dark:text-gray-400">{getLeaveType(request)}</td>
+                        <td className="py-4 px-6 text-sm text-gray-600 dark:text-gray-400">
+                          {(() => {
+                            const d = getAppliedDays(request);
+                            return `${d} day${d === 1 ? '' : 's'}`;
+                          })()}
+                        </td>
                         <td className="py-4 px-6">
                           <div className="text-sm text-gray-600 dark:text-gray-400">
                             <div>{request.startDate} to {request.endDate}</div>

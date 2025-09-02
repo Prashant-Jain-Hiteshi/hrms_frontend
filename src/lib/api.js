@@ -79,3 +79,38 @@ export const AttendanceAPI = {
     return res.data; // blob
   },
 };
+
+// Leave endpoints
+export const LeaveAPI = {
+  // Credit Configs
+  getConfigs: () => api.get('/leave/credit-config'),
+  createConfig: (data) => api.post('/leave/credit-config', data),
+  // Using PUT due to browser/PATCH issues
+  updateConfig: (leaveType, data) => api.put(`/leave/credit-config/${encodeURIComponent(leaveType)}`, data),
+  // Trigger monthly credits processing (admin)
+  triggerMonthlyCredits: () => api.post('/leave/trigger-monthly-credits'),
+  // DOJ-based balance for current user
+  myBalance: () => api.get('/leave/balance'),
+  // Leave statistics; admin can pass employeeId to query others
+  statistics: (employeeId) => api.get('/leave/statistics', { params: employeeId ? { employeeId } : {} }),
+};
+
+// Leave Calendar (Admin): holidays, weekends, working-days
+export const CalendarAPI = {
+  holidays: {
+    list: (params = {}) => api.get('/leave/calendar/holidays', { params }),
+    create: (data) => api.post('/leave/calendar/holidays', data),
+    // Use PUT for updates per user preference
+    update: (id, data) => api.put(`/leave/calendar/holidays/${encodeURIComponent(id)}`, data),
+    remove: (id) => api.delete(`/leave/calendar/holidays/${encodeURIComponent(id)}`),
+  },
+  weekends: {
+    get: () => api.get('/leave/calendar/weekends'),
+    // payload: { weekends: [0-6] } where 0=Sun ... 6=Sat
+    update: (data) => api.put('/leave/calendar/weekends', data),
+  },
+  workingDays: {
+    // params: { month: 'yyyy-mm' }
+    monthly: (params = {}) => api.get('/leave/calendar/working-days', { params }),
+  },
+};

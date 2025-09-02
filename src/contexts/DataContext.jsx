@@ -1,7 +1,8 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
 import { MOCK_EMPLOYEES, MOCK_DEPARTMENTS } from '../data/mockData';
 import { useAuth } from './AuthContext';
 import { EmployeesAPI, AttendanceAPI } from '../lib/api';
+import { LeaveAPI as LeaveCreditAPI } from '../lib/api';
 import { LeaveAPI } from '../lib/leaveApi';
 
 const DataContext = createContext();
@@ -144,6 +145,8 @@ export const DataProvider = ({ children }) => {
   ]);
   const [leaveRequests, setLeaveRequests] = useState([]);
   const [leaveTypes, setLeaveTypes] = useState([]);
+  // Leave credit configs (monthly credits per type)
+  const [leaveCreditConfigs, setLeaveCreditConfigs] = useState([]);
   const [tasks, setTasks] = useState([
     { id: 1, title: 'Complete Q3 Report', assignee: 'Admin User', priority: 'high', status: 'pending', dueDate: '2024-08-25' },
     { id: 2, title: 'Review Employee Performance', assignee: 'HR Manager', priority: 'medium', status: 'in_progress', dueDate: '2024-08-30' },
@@ -152,6 +155,31 @@ export const DataProvider = ({ children }) => {
 
   // Computed dashboard stats
   const [dashboardStats, setDashboardStats] = useState({});
+
+  // Derived: monthly credit for Annual Leave only (admin-configured)
+  const monthlyCreditAnnual = useMemo(() => {
+    try {
+      if (!Array.isArray(leaveCreditConfigs)) return 0;
+      const annual = leaveCreditConfigs.find((c) => {
+        const lt = String(c?.leaveType || '').toLowerCase();
+        return (lt === 'annual' || lt === 'annual leave' || lt === 'annual_leave') && (c?.isActive !== false);
+      });
+      const val = Number(annual?.monthlyCredit || 0);
+      return Number.isFinite(val) ? Number(val.toFixed(2)) : 0;
+    } catch { return 0; }
+  }, [leaveCreditConfigs]);
+
+  // Derived: total monthly credit sum of all active configs (if needed elsewhere)
+  const monthlyCreditTotal = useMemo(() => {
+    try {
+      if (!Array.isArray(leaveCreditConfigs)) return 0;
+      const sum = leaveCreditConfigs
+        .filter((c) => c && c.isActive !== false)
+        .reduce((acc, c) => acc + Number(c.monthlyCredit || 0), 0);
+      const val = Number.isFinite(sum) ? Number(sum.toFixed(2)) : 0;
+      return val;
+    } catch { return 0; }
+  }, [leaveCreditConfigs]);
 
   // Update dashboard stats whenever data changes
   useEffect(() => {
@@ -181,6 +209,7 @@ export const DataProvider = ({ children }) => {
     fetchEmployees();
     fetchLeaveRequests();
     fetchLeaveTypes();
+    fetchLeaveCreditConfigs();
   }, []);
 
   const fetchEmployees = async () => {
@@ -191,6 +220,19 @@ export const DataProvider = ({ children }) => {
     } catch (e) {
       // Fallback to mocks when API not available
       setEmployees(MOCK_EMPLOYEES);
+    }
+  };
+
+  // Leave credit configuration (backend-driven monthly credits)
+  const fetchLeaveCreditConfigs = async () => {
+    try {
+      const res = await LeaveCreditAPI.getConfigs();
+      const data = res?.data;
+      setLeaveCreditConfigs(Array.isArray(data) ? data : []);
+      return Array.isArray(data) ? data : [];
+    } catch (error) {
+      setLeaveCreditConfigs([]);
+      return [];
     }
   };
 
@@ -581,15 +623,98 @@ export const DataProvider = ({ children }) => {
     setTasks(prev => prev.filter(task => task.id !== id));
   };
 
+  // Helpers local to leave allocation
+  const _computeRequestDays = (req) => {
+    // Prefer explicit days if valid
+    const fallback = Number(req?.days);
+    if (!Number.isNaN(fallback) && fallback > 0) return fallback;
+    const s = req?.startDate || req?.start_date;
+    const e = req?.endDate || req?.end_date || s;
+    if (!s) return 0;
+    try {
+      const sd = new Date(s);
+      const ed = new Date(e);
+      sd.setHours(0,0,0,0);
+      ed.setHours(0,0,0,0);
+      const diff = Math.round((ed - sd) / (24 * 60 * 60 * 1000));
+      return (diff >= 0 ? diff + 1 : 1);
+    } catch {
+      return fallback || 0;
+    }
+  };
+
+  const _getRequestedTypeLabel = (req) => {
+    const t = req?.type || req?.leaveType || req?.leave_type || req?.category || '';
+    return String(t).trim();
+  };
+
+  const _pickAnnualTypeName = () => {
+    if (Array.isArray(leaveTypes) && leaveTypes.length > 0) {
+      const annual = leaveTypes.find(t => String(t?.name || t?.label || '')
+        .toLowerCase().includes('annual'));
+      if (annual?.name) return annual.name;
+      if (annual?.label) return annual.label;
+      // fallback to the leave type with highest allocation
+      const sorted = [...leaveTypes].sort((a,b) => (Number(b?.numberOfLeaves||0) - Number(a?.numberOfLeaves||0)));
+      if (sorted[0]?.name) return sorted[0].name;
+      if (sorted[0]?.label) return sorted[0].label;
+    }
+    return 'Annual Leave';
+  };
+
+  const _getBalanceByType = (balanceObj = {}) => {
+    // Try to normalize various possible shapes from backend
+    // Expected best case: { byType: { [typeName]: availableDays }, lwp?: number }
+    const byType = balanceObj.byType && typeof balanceObj.byType === 'object' ? balanceObj.byType : {};
+    return byType;
+  };
+
   // Leave approval/rejection functions - Backend integrated
   const approveLeave = async (leaveId, comments = '') => {
     try {
-      const { data } = await LeaveAPI.updateStatus(leaveId, { 
-        status: 'approved', 
-        comments 
-      });
+      // Find the request locally
+      const req = leaveRequests.find(l => String(l?.id) === String(leaveId)) || {};
+      const totalDays = _computeRequestDays(req);
+      const requestedType = _getRequestedTypeLabel(req);
+      const annualType = _pickAnnualTypeName();
+
+      // Fetch current balance to drive allocation
+      const balance = await fetchLeaveBalance();
+      const byType = _getBalanceByType(balance);
+
+      // Construct allocation: requested type -> annual -> LWP
+      let remaining = Number(totalDays) || 0;
+      const allocation = [];
+
+      if (remaining > 0 && requestedType) {
+        const avail = Number(byType[requestedType] ?? byType[requestedType?.toString?.()] ?? 0);
+        const use = Math.max(0, Math.min(remaining, isFinite(avail) ? avail : 0));
+        if (use > 0) {
+          allocation.push({ type: requestedType, days: Number(use.toFixed(2)) });
+          remaining = Number((remaining - use).toFixed(2));
+        }
+      }
+
+      if (remaining > 0 && annualType && (!requestedType || annualType !== requestedType)) {
+        const avail = Number(byType[annualType] ?? byType[annualType?.toString?.()] ?? 0);
+        const use = Math.max(0, Math.min(remaining, isFinite(avail) ? avail : 0));
+        if (use > 0) {
+          allocation.push({ type: annualType, days: Number(use.toFixed(2)) });
+          remaining = Number((remaining - use).toFixed(2));
+        }
+      }
+
+      if (remaining > 0) {
+        // Anything left becomes LWP
+        allocation.push({ type: 'LWP', days: Number(remaining.toFixed(2)) });
+        remaining = 0;
+      }
+
+      const payload = { status: 'approved', comments, allocation };
+
+      const { data } = await LeaveAPI.updateStatus(leaveId, payload);
       setLeaveRequests(prev => prev.map(leave => 
-        leave.id === leaveId ? { ...leave, ...data } : leave
+        leave.id === leaveId ? { ...leave, ...data, allocation } : leave
       ));
       return data;
     } catch (error) {
@@ -947,6 +1072,11 @@ export const DataProvider = ({ children }) => {
     leaveTypes,
     fetchLeaveTypes,
     fetchLeaveBalance,
+    // Leave credit config (backend monthly credits)
+    leaveCreditConfigs,
+    monthlyCreditTotal,
+    monthlyCreditAnnual,
+    fetchLeaveCreditConfigs,
     addLeaveType,
     updateLeaveType,
     deleteLeaveType,

@@ -4,13 +4,15 @@ import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { 
   Plus, Search, Eye, Edit, Trash2, ChevronLeft, ChevronRight,
-  Home, ChevronRight as BreadcrumbArrow
+  Home, ChevronRight as BreadcrumbArrow, Settings
 } from 'lucide-react';
 import { useData } from '../../contexts/DataContext';
+import LeaveCreditConfig from './LeaveCreditConfig';
 
 const LeaveTypes = () => {
   const { leaveTypes, addLeaveType, updateLeaveType, deleteLeaveType, searchLeaveTypes } = useData();
 
+  const [activeTab, setActiveTab] = useState('types');
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(15);
@@ -125,27 +127,68 @@ const LeaveTypes = () => {
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">LeaveType</h1>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Leave Management</h1>
         </div>
-        <Button 
-          onClick={handleAdd}
-          className="bg-green-600 hover:bg-green-700 text-white flex items-center space-x-2"
-        >
-          <Plus className="h-4 w-4" />
-          <span>Add New Leave Type</span>
-        </Button>
+        <div className="flex space-x-3">
+          <Button 
+            onClick={() => setActiveTab('credits')}
+            variant={activeTab === 'credits' ? 'default' : 'outline'}
+            className="flex items-center space-x-2"
+          >
+            <Settings className="h-4 w-4" />
+            <span>Credit Config</span>
+          </Button>
+          <Button 
+            onClick={handleAdd}
+            className="bg-green-600 hover:bg-green-700 text-white flex items-center space-x-2"
+          >
+            <Plus className="h-4 w-4" />
+            <span>Add New Leave Type</span>
+          </Button>
+        </div>
       </div>
 
-      {/* Main Content Card */}
-      <Card>
-        <CardHeader className="bg-blue-500 text-white">
-          <CardTitle className="flex items-center space-x-2">
-            <span>📋 LeaveTypes List</span>
-          </CardTitle>
-          <CardDescription className="text-blue-100">
-            Number of leaves of Half day are not added to total leaves on Employee Dashboard Page
-          </CardDescription>
-        </CardHeader>
+      {/* Tabs */}
+      <div className="border-b border-gray-200 dark:border-gray-700">
+        <nav className="-mb-px flex space-x-8">
+          <button
+            onClick={() => setActiveTab('types')}
+            className={`py-2 px-1 border-b-2 font-medium text-sm ${
+              activeTab === 'types'
+                ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
+            }`}
+          >
+            Leave Types
+          </button>
+          <button
+            onClick={() => setActiveTab('credits')}
+            className={`py-2 px-1 border-b-2 font-medium text-sm ${
+              activeTab === 'credits'
+                ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
+            }`}
+          >
+            Credit Configuration
+          </button>
+        </nav>
+      </div>
+
+      {/* Tab Content */}
+      {activeTab === 'credits' ? (
+        <LeaveCreditConfig />
+      ) : (
+        <>
+          {/* Main Content Card */}
+          <Card>
+            <CardHeader className="bg-blue-500 text-white">
+              <CardTitle className="flex items-center space-x-2">
+                <span>📋 LeaveTypes List</span>
+              </CardTitle>
+              <CardDescription className="text-blue-100">
+                Number of leaves of Half day are not added to total leaves on Employee Dashboard Page
+              </CardDescription>
+            </CardHeader>
         
         <CardContent className="p-6">
           {/* Controls */}
@@ -416,6 +459,8 @@ const LeaveTypes = () => {
             </form>
           </div>
         </div>
+      )}
+        </>
       )}
     </div>
   );
