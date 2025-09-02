@@ -12,6 +12,7 @@ import { useData } from '../../contexts/DataContext';
 import { LeaveAPI } from '../../lib/leaveApi';
 import { AttendanceAPI } from '../../lib/api';
 import { CalendarAPI } from '../../lib/api';
+import { compensatoryLeaveAPI } from '../../lib/compensatoryLeaveApi';
 import LeaveTypes from './LeaveTypes';
 
 const LeaveManagement = () => {
@@ -36,13 +37,61 @@ const LeaveManagement = () => {
   const [savingWeekend, setSavingWeekend] = useState(false);
   const [savingHoliday, setSavingHoliday] = useState(false);
   const [newHoliday, setNewHoliday] = useState({ date: '', name: '', type: 'public' });
+  const [editingHolidayId, setEditingHolidayId] = useState(null);
+  const [editHoliday, setEditHoliday] = useState({ date: '', name: '', type: 'public' });
+  const [showCalendarModal, setShowCalendarModal] = useState(false);
+
+  // Compensatory Leave state (HR only)
+  const [compensatoryLeaves, setCompensatoryLeaves] = useState([
+    {
+      id: 1,
+      employeeId: 'EMP001',
+      employeeName: 'John Doe',
+      department: 'Engineering',
+      credits: 2,
+      reason: 'Weekend work for project deadline',
+      assignedDate: '2025-08-15',
+      expiryDate: '2025-12-31',
+      status: 'active'
+    },
+    {
+      id: 2,
+      employeeId: 'EMP002',
+      employeeName: 'Jane Smith',
+      department: 'Marketing',
+      credits: 1,
+      reason: 'Holiday work for campaign launch',
+      assignedDate: '2025-08-20',
+      expiryDate: '2025-12-31',
+      status: 'active'
+    },
+    {
+      id: 3,
+      employeeId: 'EMP003',
+      employeeName: 'Mike Johnson',
+      department: 'Sales',
+      credits: 3,
+      reason: 'Extended hours during client presentation',
+      assignedDate: '2025-07-30',
+      expiryDate: '2025-11-30',
+      status: 'expired'
+    }
+  ]);
+  const [showCompensatoryForm, setShowCompensatoryForm] = useState(false);
+  const [editingCompensatory, setEditingCompensatory] = useState(null);
+  const [compensatoryForm, setCompensatoryForm] = useState({
+    employeeId: '',
+    credits: '',
+    reason: '',
+    expiryDate: ''
+  });
 
   // Role and tabs
   const role = String(user?.role || '').toLowerCase();
   const isHR = role === 'hr';
   const isAdmin = role === 'admin';
   const tabs = (() => {
-    if (isHR) return ['overview', 'mentions', 'policies'];
+    if (isHR) return ['overview', 'mentions', 'compensatory', 'policies'];
     if (role === 'employee') return ['overview', 'requests', 'mentions', 'leavebalance', 'policies'];
     // Admin and other roles: no Leave Balance
     return ['overview', 'requests', 'mentions', 'policies', 'calendar'];
@@ -57,6 +106,113 @@ const LeaveManagement = () => {
         setNotifications((prev) => prev.filter((n) => n.id !== id));
       }, timeout);
     }
+  };
+
+  // Compensatory Leave CRUD functions
+  const handleCompensatorySubmit = (e) => {
+    e.preventDefault();
+    const selectedEmployee = employees.find(emp => emp.id === parseInt(compensatoryForm.employeeId));
+    
+    if (editingCompensatory) {
+      // Update existing
+      setCompensatoryLeaves(prev => prev.map(comp => 
+        comp.id === editingCompensatory.id 
+          ? {
+              ...comp,
+              employeeId: selectedEmployee?.employeeId || comp.employeeId,
+              employeeName: selectedEmployee?.name || comp.employeeName,
+              department: selectedEmployee?.department || comp.department,
+              credits: parseInt(compensatoryForm.credits),
+              reason: compensatoryForm.reason,
+              expiryDate: compensatoryForm.expiryDate
+            }
+          : comp
+      ));
+      notify({ type: 'success', message: 'Compensatory leave updated successfully' });
+    } else {
+      // Create new
+      const newComp = {
+        id: Math.max(...compensatoryLeaves.map(c => c.id), 0) + 1,
+        employeeId: selectedEmployee?.employeeId || `EMP${String(Math.floor(Math.random() * 1000)).padStart(3, '0')}`,
+        employeeName: selectedEmployee?.name || 'Unknown Employee',
+        department: selectedEmployee?.department || 'Unknown',
+        credits: parseInt(compensatoryForm.credits),
+        reason: compensatoryForm.reason,
+        assignedDate: new Date().toISOString().split('T')[0],
+        expiryDate: compensatoryForm.expiryDate,
+        status: 'active'
+      };
+      setCompensatoryLeaves(prev => [...prev, newComp]);
+      notify({ type: 'success', message: 'Compensatory leave assigned successfully' });
+    }
+    
+    // Reset form
+    setCompensatoryForm({ employeeId: '', credits: '', reason: '', expiryDate: '' });
+    setEditingCompensatory(null);
+    setShowCompensatoryForm(false);
+  };
+
+  const handleEditCompensatory = (comp) => {
+    const employee = employees.find(emp => emp.employeeId === comp.employeeId);
+    setCompensatoryForm({
+      employeeId: employee?.id?.toString() || '',
+      credits: comp.credits.toString(),
+      reason: comp.reason,
+      expiryDate: comp.expiryDate
+    });
+    setEditingCompensatory(comp);
+    setShowCompensatoryForm(true);
+  };
+
+  const handleDeleteCompensatory = (id) => {
+    if (window.confirm('Are you sure you want to delete this compensatory leave?')) {
+      setCompensatoryLeaves(prev => prev.filter(comp => comp.id !== id));
+      notify({ type: 'success', message: 'Compensatory leave deleted successfully' });
+    }
+  };
+
+  const resetCompensatoryForm = () => {
+    setCompensatoryForm({ employeeId: '', credits: '', reason: '', expiryDate: '' });
+    setEditingCompensatory(null);
+    setShowCompensatoryForm(false);
+  };
+
+  // Build calendar days for selected month
+  const getCalendarDays = (ym) => {
+    // ym: yyyy-mm
+    const [y, m] = ym.split('-').map((v) => parseInt(v, 10));
+    const first = new Date(y, m - 1, 1);
+    const last = new Date(y, m, 0); // last day of month
+    const startWeekday = first.getDay(); // 0..6
+    const totalDays = last.getDate();
+
+    // previous month padding
+    const prevLast = new Date(y, m - 1, 0);
+    const prevDays = prevLast.getDate();
+    const leading = Array.from({ length: startWeekday }, (_, i) => {
+      const d = prevDays - startWeekday + 1 + i;
+      const dt = new Date(y, m - 2, d);
+      return { iso: dt.toISOString().slice(0, 10), day: d, inMonth: false, weekday: dt.getDay() };
+    });
+
+    // current month
+    const current = Array.from({ length: totalDays }, (_, i) => {
+      const d = i + 1;
+      const dt = new Date(y, m - 1, d);
+      return { iso: dt.toISOString().slice(0, 10), day: d, inMonth: true, weekday: dt.getDay() };
+    });
+
+    // trailing padding to fill 6 weeks grid
+    const cellsSoFar = leading.length + current.length;
+    const totalCells = Math.ceil(cellsSoFar / 7) * 7; // 5 or 6 rows
+    const trailingCount = totalCells - cellsSoFar;
+    const trailing = Array.from({ length: trailingCount }, (_, i) => {
+      const d = i + 1;
+      const dt = new Date(y, m, d);
+      return { iso: dt.toISOString().slice(0, 10), day: d, inMonth: false, weekday: dt.getDay() };
+    });
+
+    return [...leading, ...current, ...trailing];
   };
 
   // Calendar data fetchers
@@ -141,6 +297,31 @@ const LeaveManagement = () => {
       fetchWorking();
     } catch {
       notify({ type: 'error', message: 'Failed to remove holiday' });
+    }
+  };
+
+  const beginEditHoliday = (h) => {
+    setEditingHolidayId(h.id);
+    setEditHoliday({ date: h.date, name: h.name, type: h.type || 'public' });
+  };
+
+  const cancelEditHoliday = () => {
+    setEditingHolidayId(null);
+  };
+
+  const saveEditHoliday = async (id) => {
+    if (!editHoliday.date || !editHoliday.name) {
+      notify({ type: 'warning', message: 'Holiday date and name are required' });
+      return;
+    }
+    try {
+      await CalendarAPI.holidays.update(id, { ...editHoliday });
+      notify({ type: 'success', message: 'Holiday updated' });
+      setEditingHolidayId(null);
+      fetchHolidays();
+      fetchWorking();
+    } catch {
+      notify({ type: 'error', message: 'Failed to update holiday' });
     }
   };
   // Determine if the leave belongs to the current user
@@ -451,11 +632,11 @@ const LeaveManagement = () => {
   // Export ledger (Leave Balance) CSV
   const generateLedgerCSV = (rows) => {
     const headers = [
-      'Month', 'Opening', 'Monthly Credit', 'Extra Credit', 'Deducted', 'LWP', 'Closing',
+      'Month', 'Opening', 'Monthly Credit', 'Extra Credit', 'Compensatory', 'Deducted', 'LWP', 'Closing',
       'Present', 'Absent', 'Effective Present', 'Effective Absent', 'Paid Days'
     ];
     const dataRows = rows.map(r => [
-      r.label, r.opening, r.monthlyCredit, r.extraCredit, r.deducted, r.lwp, r.closing,
+      r.label, r.opening, r.monthlyCredit, r.extraCredit, r.compensatory, r.deducted, r.lwp, r.closing,
       r.present, r.absent, r.effPresent, r.effAbsent, r.paidDays
     ]);
     return [headers, ...dataRows].map(row => row.join(',')).join('\n');
@@ -777,7 +958,15 @@ const LeaveManagement = () => {
     const map = {};
     for (const req of leaveRequests) {
       if (!req || String(req.status).toLowerCase() !== 'approved') continue;
-      const days = Number(req.days) || getAppliedDays(req) || 0;
+      // Exclude Leave Without Pay from 'deducted' so it represents paid leaves only
+      const t = String(req.type || req.leaveType || req.leave_type || '').toLowerCase();
+      if (t === 'lwp' || t === 'leave without pay' || t === 'leavewithoutpay') continue;
+      
+      // Support half-day leaves
+      let days = Number(req.days) || getAppliedDays(req) || 0;
+      const isHalfDay = req.isHalfDay || req.half_day || String(req.duration || '').toLowerCase().includes('half');
+      if (isHalfDay && days === 1) days = 0.5;
+      
       const key = ymKey(req.startDate || req.createdAt || req.created_at || new Date());
       map[key] = (map[key] || 0) + days;
     }
@@ -790,7 +979,12 @@ const LeaveManagement = () => {
       if (!req || String(req.status).toLowerCase() !== 'approved') continue;
       const t = String(req.type || req.leaveType || req.leave_type || '').toLowerCase();
       if (t !== 'lwp' && t !== 'leave without pay' && t !== 'leavewithoutpay') continue;
-      const days = Number(req.days) || getAppliedDays(req) || 0;
+      
+      // Support half-day LWP
+      let days = Number(req.days) || getAppliedDays(req) || 0;
+      const isHalfDay = req.isHalfDay || req.half_day || String(req.duration || '').toLowerCase().includes('half');
+      if (isHalfDay && days === 1) days = 0.5;
+      
       const key = ymKey(req.startDate || req.createdAt || req.created_at || new Date());
       map[key] = (map[key] || 0) + days;
     }
@@ -803,11 +997,35 @@ const LeaveManagement = () => {
       const key = ymKey(rec.date);
       const status = String(rec.status || '').toLowerCase();
       if (!map[key]) map[key] = { present: 0, absent: 0 };
+      
+      // Handle half-day attendance
+      const isHalfDay = status.includes('half') || rec.isHalfDay || rec.half_day;
+      const presentValue = isHalfDay ? 0.5 : 1;
+      
       // Treat 'late' as present for Leave Balance display
-      if (status === 'present' || status === 'late') map[key].present += 1;
-      else if (status === 'absent') map[key].absent += 1;
+      if (status === 'present' || status === 'late' || status === 'half day present' || status === 'half-day present') {
+        map[key].present += presentValue;
+      } else if (status === 'absent' || status === 'half day absent' || status === 'half-day absent') {
+        map[key].absent += isHalfDay ? 0.5 : 1;
+      }
     }
     return map;
+  };
+
+  // Get compensatory credits by month for current user
+  const getCompensatoryCreditsByMonth = () => {
+    const creditsByMonth = {};
+    if (!user?.employeeId) return creditsByMonth;
+    
+    compensatoryLeaves
+      .filter(comp => comp.employeeId === user.employeeId && comp.status === 'active')
+      .forEach(comp => {
+        const assignedDate = new Date(comp.assignedDate);
+        const ym = `${assignedDate.getFullYear()}-${String(assignedDate.getMonth() + 1).padStart(2, '0')}`;
+        creditsByMonth[ym] = (creditsByMonth[ym] || 0) + comp.credits;
+      });
+    
+    return creditsByMonth;
   };
 
   const buildLedger = () => {
@@ -822,25 +1040,45 @@ const LeaveManagement = () => {
     const deductedMap = getApprovedLeavesByMonth();
     const lwpMap = getLwpByMonth();
     const attMap = getAttendanceCountsByMonth();
+    const compensatoryMap = getCompensatoryCreditsByMonth();
 
     // Opening from zero and accumulate; if backend provides opening, we can replace
     let opening = 0;
     const rows = months.map(({ ym, label }) => {
       const be = backendLedger[ym] || {};
-      const deducted = Number(
+      const extra = Number(extraCreditsByMonth[ym] || 0);
+      const compensatory = Number(compensatoryMap[ym] || 0);
+      const credit = monthlyCredit + extra + compensatory;
+      const totalAvailable = opening + credit;
+      
+      // Get raw leave days (all approved leaves for this month)
+      const rawDeducted = Number(
         (be.deducted !== undefined ? be.deducted : (deductedMap[ym] || 0))
       );
-      const lwp = Number(
+      const rawLwp = Number(
         (be.lwp !== undefined ? be.lwp : (lwpMap[ym] || 0))
       );
-      const extra = Number(extraCreditsByMonth[ym] || 0);
-      const credit = monthlyCredit + extra;
-      const closing = Number((opening + credit - deducted - lwp).toFixed(2));
+      const totalLeaves = rawDeducted + rawLwp;
+      
+      // Apply balance overflow logic: if total leaves > available balance, excess becomes LWP
+      let deducted, lwp;
+      if (totalLeaves <= totalAvailable) {
+        // Sufficient balance - all leaves are paid
+        deducted = totalLeaves;
+        lwp = 0;
+      } else {
+        // Insufficient balance - split between paid and LWP
+        deducted = Math.max(0, totalAvailable);
+        lwp = totalLeaves - deducted;
+      }
+      
+      // Closing balance cannot go negative - minimum is 0
+      const closing = Math.max(0, Number((opening + credit - deducted).toFixed(2)));
       const present = Number(attMap[ym]?.present || 0);
       const absent = Number(attMap[ym]?.absent || 0);
-      const effPresent = present; // placeholder; can incorporate WFH/half-days if available
-      const effAbsent = absent;   // placeholder
-      const paidDays = present + deducted; // present days + paid leaves
+      const effPresent = present;
+      const effAbsent = absent;
+      const paidDays = Number((present + deducted).toFixed(2)); // present days + paid leaves only
 
       // For the current month, show only actual activity and leave accrual/closing blank
       const isCurrent = ym === currentYm;
@@ -849,6 +1087,7 @@ const LeaveManagement = () => {
         opening: Number(opening.toFixed(2)),
         monthlyCredit: isCurrent ? '-' : Number(monthlyCredit.toFixed(2)),
         extraCredit: isCurrent ? '-' : Number(extra.toFixed(2)),
+        compensatory: isCurrent ? '-' : Number(compensatory.toFixed(2)),
         deducted: Number(deducted.toFixed(2)),
         lwp: Number(lwp.toFixed(2)),
         closing: isCurrent ? '-' : closing,
@@ -919,7 +1158,9 @@ const LeaveManagement = () => {
                 : 'text-primary hover:text-primary/80 hover:bg-primary/20'
             }`}
           >
-            {tab === 'mentions' ? 'Mentions' : (tab.charAt(0).toUpperCase() + tab.slice(1))}
+            {tab === 'mentions' ? 'Mentions' : 
+             tab === 'compensatory' ? 'Compensatory Leave' : 
+             (tab.charAt(0).toUpperCase() + tab.slice(1))}
           </button>
         ))}
       </div>
@@ -972,6 +1213,7 @@ const LeaveManagement = () => {
                       <th className="text-left py-3 px-4">Opening</th>
                       <th className="text-left py-3 px-4">Monthly Credit</th>
                       <th className="text-left py-3 px-4">Extra Credit</th>
+                      <th className="text-left py-3 px-4">Compensatory</th>
                       <th className="text-left py-3 px-4">Deducted</th>
                       <th className="text-left py-3 px-4">LWP</th>
                       <th className="text-left py-3 px-4">Closing</th>
@@ -994,6 +1236,11 @@ const LeaveManagement = () => {
                         <td className="py-3 px-4">{row.opening}</td>
                         <td className="py-3 px-4">{row.monthlyCredit}</td>
                         <td className="py-3 px-4">{row.extraCredit}</td>
+                        <td className="py-3 px-4">
+                          <span className={row.compensatory > 0 ? "text-green-600 dark:text-green-400 font-medium" : ""}>
+                            {row.compensatory}
+                          </span>
+                        </td>
                         <td className="py-3 px-4">{row.deducted}</td>
                         <td className="py-3 px-4">{row.lwp}</td>
                         <td className="py-3 px-4 font-medium">{row.closing}</td>
@@ -1031,6 +1278,65 @@ const LeaveManagement = () => {
               <div className="text-2xl font-semibold">{workingDays ?? '-'}</div>
             </div>
           </div>
+
+          {/* Calendar open button and modal */}
+          <div className="flex items-center justify-between">
+            <div className="font-semibold">Monthly Calendar</div>
+            <button
+              onClick={() => setShowCalendarModal(true)}
+              className="px-4 py-2 bg-primary text-white rounded"
+            >
+              Open Calendar
+            </button>
+          </div>
+
+          {showCalendarModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-black/40" onClick={() => setShowCalendarModal(false)}></div>
+              <div className="relative z-10 w-full max-w-5xl bg-white rounded-lg shadow-xl border p-4 sm:p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="text-lg font-semibold">Monthly Calendar</div>
+                  <div className="flex items-center gap-3 text-xs text-gray-600">
+                    <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded bg-primary/20 border border-primary/40"></span> Weekend</span>
+                    <span className="inline-flex items-center gap-1"><span className="w-3 h-3 rounded bg-green-100 border border-green-300"></span> Holiday</span>
+                    <button onClick={() => setShowCalendarModal(false)} className="ml-4 px-3 py-1 rounded bg-gray-200">Close</button>
+                  </div>
+                </div>
+                {(() => {
+                  const days = getCalendarDays(calMonth);
+                  const holidayMap = holidays.reduce((acc, h) => { acc[h.date] = h; return acc; }, {});
+                  return (
+                    <div className="grid grid-cols-7 gap-2">
+                      {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((w) => (
+                        <div key={w} className="text-center text-xs font-semibold text-gray-600 py-1">{w}</div>
+                      ))}
+                      {days.map((d, idx) => {
+                        const isWeekend = weekends.includes(d.weekday);
+                        const hol = holidayMap[d.iso];
+                        const base = d.inMonth ? 'bg-white' : 'bg-gray-50';
+                        const weekendBg = isWeekend ? 'bg-primary/10 border-primary/30' : 'border-gray-200';
+                        const holidayBg = hol ? 'bg-green-50 border-green-300' : '';
+                        const classes = `relative min-h-[80px] sm:min-h-[90px] rounded-md border p-2 ${base} ${holidayBg || weekendBg}`;
+                        return (
+                          <div key={idx} className={classes}>
+                            <div className={`text-xs ${d.inMonth ? 'text-gray-800' : 'text-gray-400'}`}>{d.day}</div>
+                            {hol && (
+                              <div className="mt-1">
+                                <div className="inline-block px-2 py-0.5 rounded text-[10px] font-medium bg-green-100 text-green-800 border border-green-300">
+                                  {hol.name}
+                                </div>
+                                <div className="text-[10px] text-green-700 mt-0.5 capitalize">{hol.type || 'public'}</div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+          )}
 
           {/* Weekend configuration */}
           <div className="p-4 border rounded-lg">
@@ -1109,16 +1415,77 @@ const LeaveManagement = () => {
                   )}
                   {holidays.map((h) => (
                     <tr key={h.id} className="border-b">
-                      <td className="py-2 pr-4">{h.date}</td>
-                      <td className="py-2 pr-4">{h.name}</td>
-                      <td className="py-2 pr-4 capitalize">{h.type || 'public'}</td>
-                      <td className="py-2">
-                        <button
-                          onClick={() => deleteHoliday(h.id)}
-                          className="px-3 py-1 bg-red-500 text-white rounded"
-                        >
-                          Delete
-                        </button>
+                      <td className="py-2 pr-4">
+                        {editingHolidayId === h.id ? (
+                          <input
+                            type="date"
+                            value={editHoliday.date}
+                            onChange={(e) => setEditHoliday((v) => ({ ...v, date: e.target.value }))}
+                            className="border rounded px-2 py-1"
+                          />
+                        ) : (
+                          h.date
+                        )}
+                      </td>
+                      <td className="py-2 pr-4">
+                        {editingHolidayId === h.id ? (
+                          <input
+                            type="text"
+                            value={editHoliday.name}
+                            onChange={(e) => setEditHoliday((v) => ({ ...v, name: e.target.value }))}
+                            className="border rounded px-2 py-1"
+                          />
+                        ) : (
+                          h.name
+                        )}
+                      </td>
+                      <td className="py-2 pr-4 capitalize">
+                        {editingHolidayId === h.id ? (
+                          <select
+                            value={editHoliday.type}
+                            onChange={(e) => setEditHoliday((v) => ({ ...v, type: e.target.value }))}
+                            className="border rounded px-2 py-1"
+                          >
+                            <option value="public">Public</option>
+                            <option value="restricted">Restricted</option>
+                            <option value="optional">Optional</option>
+                          </select>
+                        ) : (
+                          h.type || 'public'
+                        )}
+                      </td>
+                      <td className="py-2 flex gap-2">
+                        {editingHolidayId === h.id ? (
+                          <>
+                            <button
+                              onClick={() => saveEditHoliday(h.id)}
+                              className="px-3 py-1 bg-primary text-white rounded"
+                            >
+                              Save
+                            </button>
+                            <button
+                              onClick={cancelEditHoliday}
+                              className="px-3 py-1 bg-gray-300 rounded"
+                            >
+                              Cancel
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => beginEditHoliday(h)}
+                              className="px-3 py-1 bg-blue-500 text-white rounded"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => deleteHoliday(h.id)}
+                              className="px-3 py-1 bg-red-500 text-white rounded"
+                            >
+                              Delete
+                            </button>
+                          </>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -1830,6 +2197,166 @@ const LeaveManagement = () => {
         </div>
       )}
 
+      {/* Compensatory Leave Tab - HR Only */}
+      {selectedTab === 'compensatory' && isHR && (
+        <div className="space-y-6">
+          {/* Header with Add Button */}
+          <div className="flex justify-between items-center">
+            <div>
+              <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Compensatory Leave Management</h2>
+              <p className="text-gray-600 dark:text-gray-400">Assign extra leave credits to employees for overtime work</p>
+            </div>
+            <Button 
+              onClick={() => setShowCompensatoryForm(true)}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Assign Credits
+            </Button>
+          </div>
+
+          {/* Stats Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center">
+                  <div className="p-2 bg-green-100 dark:bg-green-900 rounded-lg">
+                    <CheckCircle className="h-6 w-6 text-green-600 dark:text-green-400" />
+                  </div>
+                  <div className="ml-4">
+                    <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Active Credits</p>
+                    <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                      {compensatoryLeaves.filter(c => c.status === 'active').reduce((sum, c) => sum + c.credits, 0)}
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+            
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center">
+                  <div className="p-2 bg-blue-100 dark:bg-blue-900 rounded-lg">
+                    <Users className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+                  </div>
+                  <div className="ml-4">
+                    <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Employees</p>
+                    <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                      {new Set(compensatoryLeaves.filter(c => c.status === 'active').map(c => c.employeeId)).size}
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+            
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex items-center">
+                  <div className="p-2 bg-orange-100 dark:bg-orange-900 rounded-lg">
+                    <AlertCircle className="h-6 w-6 text-orange-600 dark:text-orange-400" />
+                  </div>
+                  <div className="ml-4">
+                    <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Expiring Soon</p>
+                    <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                      {compensatoryLeaves.filter(c => {
+                        const expiry = new Date(c.expiryDate);
+                        const today = new Date();
+                        const diffTime = expiry - today;
+                        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                        return c.status === 'active' && diffDays <= 30 && diffDays > 0;
+                      }).length}
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Compensatory Leave Table */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Compensatory Leave Records</CardTitle>
+              <CardDescription>View and manage all compensatory leave assignments</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm text-left">
+                  <thead className="text-xs text-gray-700 dark:text-gray-400 uppercase bg-gray-50 dark:bg-gray-800">
+                    <tr>
+                      <th className="px-6 py-3">Employee</th>
+                      <th className="px-6 py-3">Department</th>
+                      <th className="px-6 py-3">Credits</th>
+                      <th className="px-6 py-3">Reason</th>
+                      <th className="px-6 py-3">Assigned Date</th>
+                      <th className="px-6 py-3">Expiry Date</th>
+                      <th className="px-6 py-3">Status</th>
+                      <th className="px-6 py-3">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {compensatoryLeaves.map((comp) => (
+                      <tr key={comp.id} className="bg-white dark:bg-gray-900 border-b dark:border-gray-700">
+                        <td className="px-6 py-4">
+                          <div>
+                            <div className="font-medium text-gray-900 dark:text-white">{comp.employeeName}</div>
+                            <div className="text-gray-500 dark:text-gray-400">{comp.employeeId}</div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 text-gray-900 dark:text-white">{comp.department}</td>
+                        <td className="px-6 py-4">
+                          <span className="bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs font-medium px-2.5 py-0.5 rounded">
+                            {comp.credits} days
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-gray-900 dark:text-white max-w-xs truncate" title={comp.reason}>
+                          {comp.reason}
+                        </td>
+                        <td className="px-6 py-4 text-gray-900 dark:text-white">{comp.assignedDate}</td>
+                        <td className="px-6 py-4 text-gray-900 dark:text-white">{comp.expiryDate}</td>
+                        <td className="px-6 py-4">
+                          <span className={`text-xs font-medium px-2.5 py-0.5 rounded ${
+                            comp.status === 'active' 
+                              ? 'bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200'
+                              : 'bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200'
+                          }`}>
+                            {comp.status}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex space-x-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleEditCompensatory(comp)}
+                              className="text-blue-600 hover:text-blue-800"
+                            >
+                              Edit
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleDeleteCompensatory(comp.id)}
+                              className="text-red-600 hover:text-red-800"
+                            >
+                              Delete
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {compensatoryLeaves.length === 0 && (
+                  <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                    No compensatory leave records found
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       {/* Policies Tab - Admin Only */}
       {selectedTab === 'policies' && isAdmin && (
         <div className="space-y-6">
@@ -1888,6 +2415,97 @@ const LeaveManagement = () => {
               </div>
             </CardContent>
           </Card>
+        </div>
+      )}
+
+      {/* Compensatory Leave Form Modal */}
+      {showCompensatoryForm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md mx-4">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+              {editingCompensatory ? 'Edit Compensatory Leave' : 'Assign Compensatory Leave'}
+            </h3>
+            
+            <form onSubmit={handleCompensatorySubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Employee
+                </label>
+                <select
+                  value={compensatoryForm.employeeId}
+                  onChange={(e) => setCompensatoryForm(prev => ({ ...prev, employeeId: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+                  required
+                >
+                  <option value="">Select Employee</option>
+                  {employees.map((emp) => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.name} ({emp.employeeId}) - {emp.department}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Credits (Days)
+                </label>
+                <Input
+                  type="number"
+                  min="1"
+                  max="10"
+                  value={compensatoryForm.credits}
+                  onChange={(e) => setCompensatoryForm(prev => ({ ...prev, credits: e.target.value }))}
+                  placeholder="Enter number of days"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Reason
+                </label>
+                <textarea
+                  value={compensatoryForm.reason}
+                  onChange={(e) => setCompensatoryForm(prev => ({ ...prev, reason: e.target.value }))}
+                  placeholder="Reason for compensatory leave (e.g., weekend work, overtime)"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+                  rows="3"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Expiry Date
+                </label>
+                <Input
+                  type="date"
+                  value={compensatoryForm.expiryDate}
+                  onChange={(e) => setCompensatoryForm(prev => ({ ...prev, expiryDate: e.target.value }))}
+                  min={new Date().toISOString().split('T')[0]}
+                  required
+                />
+              </div>
+
+              <div className="flex space-x-3 pt-4">
+                <Button
+                  type="submit"
+                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
+                >
+                  {editingCompensatory ? 'Update' : 'Assign'} Credits
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={resetCompensatoryForm}
+                  className="flex-1"
+                >
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>
