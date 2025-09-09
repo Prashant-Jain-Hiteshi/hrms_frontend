@@ -96,6 +96,25 @@ export const LeaveAPI = {
 };
 
 // Leave Calendar (Admin): holidays, weekends, working-days
+// Department endpoints
+export const DepartmentAPI = {
+  list: (params = {}) => api.get('/departments', { params }),
+  get: (id) => api.get(`/departments/${id}`),
+  create: (data) => api.post('/departments', data),
+  update: (id, data) => api.put(`/departments/${id}`, data),
+  delete: (id) => api.delete(`/departments/${id}`),
+};
+
+// Payroll endpoints
+export const PayrollAPI = {
+  list: (params = {}) => api.get('/payroll', { params }),
+  get: (id) => api.get(`/payroll/${id}`),
+  create: (data) => api.post('/payroll', data),
+  update: (id, data) => api.put(`/payroll/${id}`, data),
+  delete: (id) => api.delete(`/payroll/${id}`),
+  process: (data) => api.post('/payroll/process', data),
+};
+
 export const CalendarAPI = {
   holidays: {
     list: (params = {}) => api.get('/leave/calendar/holidays', { params }),

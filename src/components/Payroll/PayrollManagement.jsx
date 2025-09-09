@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
@@ -13,90 +13,245 @@ import { useData } from '../../contexts/DataContext';
 
 const PayrollManagement = () => {
   const { user } = useAuth();
-  const { employees, payrollRecords } = useData();
+  const { 
+    employees, 
+    payrolls, 
+    departments,
+    fetchPayrolls,
+    payrollLoading,
+    payrollStats,
+    employeesLoading,
+    departmentsLoading
+  } = useData();
+  
   const [selectedTab, setSelectedTab] = useState('overview');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [showViewModal, setShowViewModal] = useState(false);
-  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [selectedPayroll, setSelectedPayroll] = useState(null);
+  const [filters, setFilters] = useState({
+    status: '',
+    department: '',
+    month: new Date().getMonth() + 1,
+    year: new Date().getFullYear()
+  });
 
-  const payrollData = [
-    { month: 'Aug', gross: 450000, net: 380000, deductions: 70000 },
-    { month: 'Sep', gross: 465000, net: 395000, deductions: 70000 },
-    { month: 'Oct', gross: 470000, net: 398000, deductions: 72000 },
-    { month: 'Nov', gross: 485000, net: 410000, deductions: 75000 },
-    { month: 'Dec', gross: 520000, net: 440000, deductions: 80000 },
-    { month: 'Jan', gross: 495000, net: 420000, deductions: 75000 }
-  ];
-
-  const employeePayroll = [
-    {
-      id: 1,
-      name: 'John Doe',
-      position: 'Software Engineer',
-      department: 'Engineering',
-      basicSalary: 8000,
-      allowances: 1200,
-      deductions: 1800,
-      netSalary: 7400,
-      status: 'processed'
-    },
-    {
-      id: 2,
-      name: 'Jane Smith',
-      position: 'Product Manager',
-      department: 'Product',
-      basicSalary: 9500,
-      allowances: 1500,
-      deductions: 2100,
-      netSalary: 8900,
-      status: 'processed'
-    },
-    {
-      id: 3,
-      name: 'Mike Johnson',
-      position: 'Designer',
-      department: 'Design',
-      basicSalary: 7000,
-      allowances: 1000,
-      deductions: 1600,
-      netSalary: 6400,
-      status: 'pending'
+  // Format payroll data for charts
+  const payrollData = useMemo(() => {
+    if (!payrolls?.length) return [];
+    
+    // Group by month
+    const monthlyData = payrolls.reduce((acc, payroll) => {
+      const date = new Date(payroll.payPeriodStart);
+      const month = date.toLocaleString('default', { month: 'short' });
+      const year = date.getFullYear();
+      const key = `${month} ${year}`;
+      
+      if (!acc[key]) {
+        acc[key] = {
+          month: month,
+          year: year,
+          gross: 0,
+          net: 0,
+          deductions: 0
+        };
+      }
+      
+      acc[key].gross += payroll.grossSalary || 0;
+      acc[key].net += payroll.netSalary || 0;
+      acc[key].deductions += (payroll.totalDeductions || 0);
+      
+      return acc;
+    }, {});
+    
+    return Object.values(monthlyData);
+  }, [payrolls]);
+  
+  // Filtered employee payroll data
+  const employeePayroll = useMemo(() => {
+    // If we have real payroll data from backend, use it
+    if (payrolls?.length > 0) {
+      return payrolls.map(payroll => {
+        const employee = employees.find(e => e.id === payroll.employeeId) || {};
+        const department = departments.find(d => d.id === employee.departmentId) || {};
+        
+        return {
+          id: payroll.id,
+          name: employee.name || 'Unknown',
+          position: employee.position || 'N/A',
+          department: department.name || 'N/A',
+          basicSalary: payroll.basicSalary || 0,
+          allowances: payroll.totalAllowances || 0,
+          deductions: payroll.totalDeductions || 0,
+          netSalary: payroll.netSalary || 0,
+          status: payroll.status?.toLowerCase() || 'pending',
+          payPeriod: payroll.payPeriod,
+          paymentDate: payroll.paymentDate,
+          paymentMethod: payroll.paymentMethod || 'Bank Transfer'
+        };
+      });
     }
-  ];
-
-  const reimbursements = [
-    {
-      id: 1,
-      employee: 'Sarah Wilson',
-      type: 'Travel',
-      amount: 450,
-      date: '2024-02-10',
-      status: 'pending',
-      description: 'Client meeting travel expenses'
-    },
-    {
-      id: 2,
-      employee: 'David Brown',
-      type: 'Medical',
-      amount: 280,
-      date: '2024-02-08',
-      status: 'approved',
-      description: 'Health checkup reimbursement'
-    },
-    {
-      id: 3,
-      employee: 'Lisa Garcia',
-      type: 'Equipment',
-      amount: 120,
-      date: '2024-02-05',
-      status: 'rejected',
-      description: 'Office supplies'
+    
+    // If no payroll data but we have employees, create mock payroll data
+    if (employees?.length > 0) {
+      return employees.slice(0, 10).map((employee, index) => {
+        const department = departments.find(d => d.id === employee.departmentId) || 
+                          departments.find(d => d.name === employee.department) || 
+                          { name: employee.department || 'Unknown' };
+        
+        // Generate realistic payroll data based on employee info
+        const basicSalary = employee.salary || (Math.floor(Math.random() * 50000) + 30000);
+        const allowances = Math.floor(basicSalary * 0.15);
+        const deductions = Math.floor(basicSalary * 0.18);
+        const netSalary = basicSalary + allowances - deductions;
+        
+        return {
+          id: `mock-${employee.id || index}`,
+          name: employee.name || `Employee ${index + 1}`,
+          position: employee.position || employee.designation || 'Staff',
+          department: department.name || 'General',
+          basicSalary,
+          allowances,
+          deductions,
+          netSalary,
+          status: index % 3 === 0 ? 'pending' : 'processed',
+          payPeriod: `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`,
+          paymentDate: new Date().toISOString().split('T')[0],
+          paymentMethod: 'Bank Transfer'
+        };
+      });
     }
-  ];
+    
+    // Fallback: create basic mock data
+    return [
+      {
+        id: 'mock-1',
+        name: 'John Doe',
+        position: 'Software Engineer',
+        department: 'Engineering',
+        basicSalary: 8000,
+        allowances: 1200,
+        deductions: 1800,
+        netSalary: 7400,
+        status: 'processed',
+        payPeriod: '2024-02',
+        paymentDate: '2024-02-28',
+        paymentMethod: 'Bank Transfer'
+      },
+      {
+        id: 'mock-2',
+        name: 'Jane Smith',
+        position: 'Product Manager',
+        department: 'Product',
+        basicSalary: 9500,
+        allowances: 1500,
+        deductions: 2100,
+        netSalary: 8900,
+        status: 'processed',
+        payPeriod: '2024-02',
+        paymentDate: '2024-02-28',
+        paymentMethod: 'Bank Transfer'
+      },
+      {
+        id: 'mock-3',
+        name: 'Mike Johnson',
+        position: 'Designer',
+        department: 'Design',
+        basicSalary: 7000,
+        allowances: 1000,
+        deductions: 1600,
+        netSalary: 6400,
+        status: 'pending',
+        payPeriod: '2024-02',
+        paymentDate: null,
+        paymentMethod: 'Bank Transfer'
+      }
+    ];
+  }, [payrolls, employees, departments]);
+  
+  // Filtered reimbursements - will be populated from API when available
+  const reimbursements = useMemo(() => {
+    return [];
+  }, []);
+  
+  // Apply filters to payroll data
+  const filteredPayrolls = useMemo(() => {
+    return employeePayroll.filter(payroll => {
+      const matchesSearch = !searchTerm || 
+        payroll.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        payroll.department.toLowerCase().includes(searchTerm.toLowerCase());
+      
+      const matchesStatus = !filters.status || payroll.status === filters.status.toLowerCase();
+      const matchesDept = !filters.department || payroll.department === filters.department;
+      
+      return matchesSearch && matchesStatus && matchesDept;
+    });
+  }, [employeePayroll, searchTerm, filters]);
+  
+  // Fetch data on component mount and when filters change
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        console.log('PayrollManagement: Loading payroll data with filters:', filters);
+        console.log('PayrollManagement: Current employees count:', employees?.length || 0);
+        console.log('PayrollManagement: Current departments count:', departments?.length || 0);
+        console.log('PayrollManagement: Current payrolls count:', payrolls?.length || 0);
+        
+        await fetchPayrolls({
+          month: filters.month,
+          year: filters.year,
+          status: filters.status || undefined,
+          department: filters.department || undefined
+        });
+      } catch (error) {
+        console.error('Error loading payroll data:', error);
+      }
+    };
+    
+    loadData();
+  }, [filters, fetchPayrolls]);
+  
+  // Debug logging for data changes
+  useEffect(() => {
+    console.log('PayrollManagement: Employee payroll data updated:', {
+      employeePayrollCount: employeePayroll?.length || 0,
+      filteredPayrollsCount: filteredPayrolls?.length || 0,
+      employeesCount: employees?.length || 0,
+      payrollsCount: payrolls?.length || 0
+    });
+  }, [employeePayroll, filteredPayrolls, employees, payrolls]);
+  
+  // Handle filter changes
+  const handleFilterChange = (key, value) => {
+    setFilters(prev => ({
+      ...prev,
+      [key]: value
+    }));
+  };
+  
+  // Handle view payroll details
+  const handleViewPayroll = (payroll) => {
+    setSelectedPayroll(payroll);
+    setShowViewModal(true);
+  };
+  
+  // Handle process payroll
+  const handleProcessPayroll = async () => {
+    try {
+      // This would be implemented when the process payroll functionality is ready
+      console.log('Processing payroll with filters:', filters);
+      // await processPayroll({
+      //   month: filters.month,
+      //   year: filters.year,
+      //   department: filters.department || undefined
+      // });
+    } catch (error) {
+      console.error('Error processing payroll:', error);
+    }
+  };
 
   const getStatusColor = (status) => {
     switch (status) {
@@ -420,7 +575,7 @@ const PayrollManagement = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredPayroll.map((employee) => (
+                    {filteredPayrolls.map((employee) => (
                       <tr key={employee.id} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
                         <td className="py-3 px-4">
                           <div className="flex items-center space-x-3">

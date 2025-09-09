@@ -1,21 +1,24 @@
-import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 import { MOCK_EMPLOYEES, MOCK_DEPARTMENTS } from '../data/mockData';
 import { useAuth } from './AuthContext';
-import { EmployeesAPI, AttendanceAPI } from '../lib/api';
+import { EmployeesAPI, AttendanceAPI, PayrollAPI, DepartmentAPI } from '../lib/api';
 import { LeaveAPI as LeaveCreditAPI } from '../lib/api';
 import { LeaveAPI } from '../lib/leaveApi';
 
+// Create the context
 const DataContext = createContext();
 
-export const useData = () => {
+// Create a custom hook to use the data context
+const useData = () => {
   const context = useContext(DataContext);
-  if (!context) {
+  if (context === undefined) {
     throw new Error('useData must be used within a DataProvider');
   }
   return context;
 };
 
-export const DataProvider = ({ children }) => {
+// Create the provider component
+const DataProvider = ({ children }) => {
   // Core data states
   const [employees, setEmployees] = useState([]);
   const [departments, setDepartments] = useState(MOCK_DEPARTMENTS);
@@ -27,6 +30,169 @@ export const DataProvider = ({ children }) => {
   const { user } = useAuth();
   const [allAttendance, setAllAttendance] = useState([]);
   const [allAttendanceLoading, setAllAttendanceLoading] = useState(false);
+  
+  // Payroll states
+  const [payrolls, setPayrolls] = useState([]);
+  const [payrollLoading, setPayrollLoading] = useState(false);
+  const [payrollError, setPayrollError] = useState(null);
+  const [payrollStats, setPayrollStats] = useState({
+    totalPayroll: 0,
+    averageSalary: 0,
+    employeesPaid: 0,
+    pendingPayrolls: 0,
+  });
+  
+  // Loading and error states
+  const [employeesLoading, setEmployeesLoading] = useState(false);
+  const [employeesError, setEmployeesError] = useState(null);
+  const [departmentsLoading, setDepartmentsLoading] = useState(false);
+  const [departmentsError, setDepartmentsError] = useState(null);
+  
+  // Fetch all employees
+  const fetchEmployees = useCallback(async () => {
+    try {
+      setEmployeesLoading(true);
+      setEmployeesError(null);
+      const response = await EmployeesAPI.list();
+      const employeeData = Array.isArray(response.data) ? response.data : 
+                          (response.data?.rows ? response.data.rows : []);
+      setEmployees(employeeData);
+      return employeeData;
+    } catch (error) {
+      console.error('Error fetching employees:', error);
+      setEmployeesError(error.message || 'Failed to fetch employees');
+      // Fallback to mock employees when API is not available
+      setEmployees(MOCK_EMPLOYEES);
+      return MOCK_EMPLOYEES;
+    } finally {
+      setEmployeesLoading(false);
+    }
+  }, []);
+  
+  // Fetch all departments
+  const fetchDepartments = useCallback(async () => {
+    try {
+      setDepartmentsLoading(true);
+      setDepartmentsError(null);
+      const response = await DepartmentAPI.list();
+      setDepartments(response.data);
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching departments:', error);
+      setDepartmentsError(error.message || 'Failed to fetch departments');
+      // Fallback to mock departments when API is not available
+      setDepartments(MOCK_DEPARTMENTS);
+      return MOCK_DEPARTMENTS;
+    } finally {
+      setDepartmentsLoading(false);
+    }
+  }, []);
+  
+  // Fetch payroll data with filters
+  const fetchPayrolls = useCallback(async (params = {}) => {
+    try {
+      setPayrollLoading(true);
+      setPayrollError(null);
+      
+      // Add default params if not provided
+      const defaultParams = {
+        page: 1,
+        limit: 100,
+        sortBy: 'payPeriodStart',
+        sortOrder: 'desc',
+        ...params
+      };
+      
+      const response = await PayrollAPI.list(defaultParams);
+      const payrollData = Array.isArray(response.data) ? response.data : 
+                         (response.data?.rows ? response.data.rows : []);
+      setPayrolls(payrollData);
+      
+      // Calculate payroll statistics
+      if (payrollData && payrollData.length > 0) {
+        const totalPayroll = payrollData.reduce((sum, payroll) => sum + (payroll.netSalary || 0), 0);
+        const pendingPayrolls = payrollData.filter(p => p.status === 'PENDING').length;
+        const processedPayrolls = payrollData.filter(p => p.status === 'PROCESSED').length;
+        
+        setPayrollStats({
+          totalPayroll,
+          averageSalary: totalPayroll / payrollData.length,
+          employeesPaid: processedPayrolls,
+          pendingPayrolls,
+        });
+      }
+      
+      return payrollData;
+    } catch (error) {
+      console.error('Error fetching payrolls:', error);
+      setPayrollError(error.message || 'Failed to fetch payroll data');
+      // Fallback to empty array when API is not available
+      setPayrolls([]);
+      setPayrollStats({
+        totalPayroll: 0,
+        averageSalary: 0,
+        employeesPaid: 0,
+        pendingPayrolls: 0,
+      });
+      return [];
+    } finally {
+      setPayrollLoading(false);
+    }
+  }, []);
+  
+  // Process payroll for employees
+  const processPayroll = useCallback(async (employeeIds, periodStart, periodEnd) => {
+    try {
+      setPayrollLoading(true);
+      setPayrollError(null);
+      
+      const response = await PayrollAPI.process({
+        employeeIds,
+        periodStart: new Date(periodStart).toISOString(),
+        periodEnd: new Date(periodEnd).toISOString()
+      });
+      
+      // Refresh payroll data
+      await fetchPayrolls();
+      return response.data;
+    } catch (error) {
+      console.error('Error processing payroll:', error);
+      setPayrollError(error.response?.data?.message || 'Failed to process payroll');
+      throw error;
+    } finally {
+      setPayrollLoading(false);
+    }
+  }, [fetchPayrolls]);
+  
+  // Fetch initial data when component mounts
+  useEffect(() => {
+    const loadInitialData = async () => {
+      try {
+        // Load data independently to avoid one failure breaking others
+        const promises = [
+          fetchEmployees().catch(err => {
+            console.error('Failed to load employees:', err);
+            return [];
+          }),
+          fetchDepartments().catch(err => {
+            console.error('Failed to load departments:', err);
+            return MOCK_DEPARTMENTS;
+          }),
+          fetchPayrolls().catch(err => {
+            console.error('Failed to load payrolls:', err);
+            return [];
+          })
+        ];
+        
+        await Promise.allSettled(promises);
+        console.log('Initial data loading completed');
+      } catch (error) {
+        console.error('Error loading initial data:', error);
+      }
+    };
+    
+    loadInitialData();
+  }, [fetchEmployees, fetchDepartments, fetchPayrolls]);
   
   // Extended module states
   const [jobs, setJobs] = useState([
@@ -210,18 +376,10 @@ export const DataProvider = ({ children }) => {
     fetchLeaveRequests();
     fetchLeaveTypes();
     fetchLeaveCreditConfigs();
+    fetchPayrolls();
   }, []);
 
-  const fetchEmployees = async () => {
-    try {
-      const res = await EmployeesAPI.list({ limit: 200, offset: 0 });
-      const data = res?.data?.rows || res?.data || [];
-      if (Array.isArray(data)) setEmployees(data);
-    } catch (e) {
-      // Fallback to mocks when API not available
-      setEmployees(MOCK_EMPLOYEES);
-    }
-  };
+
 
   // Leave credit configuration (backend-driven monthly credits)
   const fetchLeaveCreditConfigs = async () => {
@@ -623,165 +781,6 @@ export const DataProvider = ({ children }) => {
     setTasks(prev => prev.filter(task => task.id !== id));
   };
 
-  // Helpers local to leave allocation
-  const _computeRequestDays = (req) => {
-    // Prefer explicit days if valid
-    const fallback = Number(req?.days);
-    if (!Number.isNaN(fallback) && fallback > 0) return fallback;
-    const s = req?.startDate || req?.start_date;
-    const e = req?.endDate || req?.end_date || s;
-    if (!s) return 0;
-    try {
-      const sd = new Date(s);
-      const ed = new Date(e);
-      sd.setHours(0,0,0,0);
-      ed.setHours(0,0,0,0);
-      const diff = Math.round((ed - sd) / (24 * 60 * 60 * 1000));
-      return (diff >= 0 ? diff + 1 : 1);
-    } catch {
-      return fallback || 0;
-    }
-  };
-
-  const _getRequestedTypeLabel = (req) => {
-    const t = req?.type || req?.leaveType || req?.leave_type || req?.category || '';
-    return String(t).trim();
-  };
-
-  const _pickAnnualTypeName = () => {
-    if (Array.isArray(leaveTypes) && leaveTypes.length > 0) {
-      const annual = leaveTypes.find(t => String(t?.name || t?.label || '')
-        .toLowerCase().includes('annual'));
-      if (annual?.name) return annual.name;
-      if (annual?.label) return annual.label;
-      // fallback to the leave type with highest allocation
-      const sorted = [...leaveTypes].sort((a,b) => (Number(b?.numberOfLeaves||0) - Number(a?.numberOfLeaves||0)));
-      if (sorted[0]?.name) return sorted[0].name;
-      if (sorted[0]?.label) return sorted[0].label;
-    }
-    return 'Annual Leave';
-  };
-
-  const _getBalanceByType = (balanceObj = {}) => {
-    // Try to normalize various possible shapes from backend
-    // Expected best case: { byType: { [typeName]: availableDays }, lwp?: number }
-    const byType = balanceObj.byType && typeof balanceObj.byType === 'object' ? balanceObj.byType : {};
-    return byType;
-  };
-
-  // Leave approval/rejection functions - Backend integrated
-  const approveLeave = async (leaveId, comments = '') => {
-    try {
-      // Find the request locally
-      const req = leaveRequests.find(l => String(l?.id) === String(leaveId)) || {};
-      const totalDays = _computeRequestDays(req);
-      const requestedType = _getRequestedTypeLabel(req);
-      const annualType = _pickAnnualTypeName();
-
-      // Fetch current balance to drive allocation
-      const balance = await fetchLeaveBalance();
-      const byType = _getBalanceByType(balance);
-
-      // Construct allocation: requested type -> annual -> LWP
-      let remaining = Number(totalDays) || 0;
-      const allocation = [];
-
-      if (remaining > 0 && requestedType) {
-        const avail = Number(byType[requestedType] ?? byType[requestedType?.toString?.()] ?? 0);
-        const use = Math.max(0, Math.min(remaining, isFinite(avail) ? avail : 0));
-        if (use > 0) {
-          allocation.push({ type: requestedType, days: Number(use.toFixed(2)) });
-          remaining = Number((remaining - use).toFixed(2));
-        }
-      }
-
-      if (remaining > 0 && annualType && (!requestedType || annualType !== requestedType)) {
-        const avail = Number(byType[annualType] ?? byType[annualType?.toString?.()] ?? 0);
-        const use = Math.max(0, Math.min(remaining, isFinite(avail) ? avail : 0));
-        if (use > 0) {
-          allocation.push({ type: annualType, days: Number(use.toFixed(2)) });
-          remaining = Number((remaining - use).toFixed(2));
-        }
-      }
-
-      if (remaining > 0) {
-        // Anything left becomes LWP
-        allocation.push({ type: 'LWP', days: Number(remaining.toFixed(2)) });
-        remaining = 0;
-      }
-
-      const payload = { status: 'approved', comments, allocation };
-
-      const { data } = await LeaveAPI.updateStatus(leaveId, payload);
-      setLeaveRequests(prev => prev.map(leave => 
-        leave.id === leaveId ? { ...leave, ...data, allocation } : leave
-      ));
-      return data;
-    } catch (error) {
-      console.error('Failed to approve leave request:', error);
-      throw error; // Re-throw to let component handle the error
-    }
-  };
-
-  const rejectLeave = async (leaveId, comments = '') => {
-    try {
-      const { data } = await LeaveAPI.updateStatus(leaveId, { 
-        status: 'rejected', 
-        comments 
-      });
-      setLeaveRequests(prev => prev.map(leave => 
-        leave.id === leaveId ? { ...leave, ...data } : leave
-      ));
-      return data;
-    } catch (error) {
-      console.error('Failed to reject leave request:', error);
-      throw error; // Re-throw to let component handle the error
-    }
-  };
-
-  // Quick actions for dashboard
-  const quickActions = {
-    markAttendance: (employeeId, status = 'present') => {
-      const employee = employees.find(emp => emp.id === employeeId);
-      if (employee) {
-        const existingRecord = attendanceRecords.find(record => 
-          record.employeeId === employee.employeeId && 
-          record.date === new Date().toISOString().split('T')[0]
-        );
-        
-        if (existingRecord) {
-          updateAttendanceRecord(existingRecord.id, { status });
-        } else {
-          addAttendanceRecord({
-            employeeId: employee.employeeId,
-            name: employee.name,
-            checkIn: status === 'present' ? new Date().toLocaleTimeString() : '-',
-            checkOut: '-',
-            date: new Date().toISOString().split('T')[0],
-            status,
-            hours: '0h 0m'
-          });
-        }
-      }
-    },
-    
-    approveLeave: (leaveId) => {
-      updateLeaveRequest(leaveId, { status: 'approved' });
-    },
-    
-    rejectLeave: (leaveId) => {
-      updateLeaveRequest(leaveId, { status: 'rejected' });
-    },
-    
-    completeTask: (taskId) => {
-      updateTask(taskId, { status: 'completed' });
-    },
-    
-    assignTask: (taskData) => {
-      return addTask(taskData);
-    }
-  };
-
   // Recruitment CRUD operations
   const addJob = (jobData) => {
     const newJob = {
@@ -958,6 +957,8 @@ export const DataProvider = ({ children }) => {
     setReviews(prev => prev.filter(review => review.id !== reviewId));
   };
 
+
+
   // Role-based data filtering
   const getFilteredData = (dataType, userRole, userId) => {
     switch (dataType) {
@@ -1024,33 +1025,49 @@ export const DataProvider = ({ children }) => {
   };
 
   const value = {
-    // Employee CRUD
+    // Core data
     employees,
+    departments,
+    myAttendance,
+    attendanceSummary,
+    attendanceStatus,
+    attendanceLoading,
+    attendanceError,
+    allAttendance,
+    allAttendanceLoading,
+    
+    // Payroll data
+    payrolls,
+    payrollLoading,
+    payrollError,
+    payrollStats,
+    fetchPayrolls,
+    processPayroll,
+    
+    // Employee data and functions
+    employeesLoading,
+    employeesError,
+    fetchEmployees,
     addEmployee,
     updateEmployee,
     deleteEmployee,
     
-    // Department CRUD
-    departments,
+    // Department data and functions
+    departmentsLoading,
+    departmentsError,
+    fetchDepartments,
     addDepartment,
     updateDepartment,
     deleteDepartment,
     
     // Attendance CRUD
     attendanceRecords,
-    myAttendance,
-    attendanceSummary,
-    attendanceStatus,
-    attendanceLoading,
-    attendanceError,
     fetchMyAttendance,
     fetchAttendanceSummary,
     fetchAttendanceStatus,
+    fetchAllAttendance,
     attendanceCheckIn,
     attendanceCheckOut,
-    allAttendance,
-    allAttendanceLoading,
-    fetchAllAttendance,
     addAttendanceRecord,
     updateAttendanceRecord,
     deleteAttendanceRecord,
@@ -1064,9 +1081,94 @@ export const DataProvider = ({ children }) => {
     fetchLeaveRequestsForApproval,
     fetchLeaveRequestsForCC,
     markLeaveAsRead,
-    approveLeave,
-    rejectLeave,
-    cancelLeave,
+    
+    // Approve leave request
+    approveLeave: async (leaveId, comments = '') => {
+      try {
+        // Find the request locally
+        const req = leaveRequests.find(l => String(l?.id) === String(leaveId)) || {};
+        const totalDays = _computeRequestDays(req);
+        const requestedType = _getRequestedTypeLabel(req);
+        const annualType = _pickAnnualTypeName();
+
+        // Fetch current balance to drive allocation
+        const balance = await fetchLeaveBalance();
+        const byType = _getBalanceByType(balance);
+
+        // Construct allocation: requested type -> annual -> LWP
+        let remaining = Number(totalDays) || 0;
+        const allocation = [];
+
+        if (remaining > 0 && requestedType) {
+          const avail = Number(byType[requestedType] ?? byType[requestedType?.toString?.()] ?? 0);
+          const use = Math.max(0, Math.min(remaining, isFinite(avail) ? avail : 0));
+          if (use > 0) {
+            allocation.push({ type: requestedType, days: Number(use.toFixed(2)) });
+            remaining = Number((remaining - use).toFixed(2));
+          }
+        }
+
+        if (remaining > 0 && annualType && (!requestedType || annualType !== requestedType)) {
+          const avail = Number(byType[annualType] ?? byType[annualType?.toString?.()] ?? 0);
+          const use = Math.max(0, Math.min(remaining, isFinite(avail) ? avail : 0));
+          if (use > 0) {
+            allocation.push({ type: annualType, days: Number(use.toFixed(2)) });
+            remaining = Number((remaining - use).toFixed(2));
+          }
+        }
+
+        if (remaining > 0) {
+          // Anything left becomes LWP
+          allocation.push({ type: 'LWP', days: Number(remaining.toFixed(2)) });
+          remaining = 0;
+        }
+
+        const payload = { status: 'approved', comments, allocation };
+
+        const { data } = await LeaveAPI.updateStatus(leaveId, payload);
+        setLeaveRequests(prev => prev.map(leave => 
+          leave.id === leaveId ? { ...leave, ...data, allocation } : leave
+        ));
+        return data;
+      } catch (error) {
+        console.error('Failed to approve leave request:', error);
+        throw error; // Re-throw to let component handle the error
+      }
+    },
+    
+    // Reject leave request
+    rejectLeave: async (leaveId, comments = '') => {
+      try {
+        const { data } = await LeaveAPI.updateStatus(leaveId, { 
+          status: 'rejected', 
+          comments 
+        });
+        setLeaveRequests(prev => prev.map(leave => 
+          leave.id === leaveId ? { ...leave, ...data } : leave
+        ));
+        return data;
+      } catch (error) {
+        console.error('Failed to reject leave request:', error);
+        throw error; // Re-throw to let component handle the error
+      }
+    },
+    
+    // Cancel leave request
+    cancelLeave: async (leaveId, comments = '') => {
+      try {
+        const { data } = await LeaveAPI.updateStatus(leaveId, { 
+          status: 'cancelled', 
+          comments 
+        });
+        setLeaveRequests(prev => prev.map(leave => 
+          leave.id === leaveId ? { ...leave, ...data } : leave
+        ));
+        return data;
+      } catch (error) {
+        console.error('Failed to cancel leave request:', error);
+        throw error; // Re-throw to let component handle the error
+      }
+    },
     
     // Leave Types CRUD
     leaveTypes,
@@ -1150,12 +1252,104 @@ export const DataProvider = ({ children }) => {
     dashboardStats,
     
     // Quick actions for dashboard
-    quickActions
+    quickActions: {
+      // Attendance quick actions
+      markAttendance: (employeeId, status = 'present') => {
+        const employee = employees.find(emp => emp.id === employeeId);
+        if (employee) {
+          const existingRecord = allAttendance.find(record => 
+            record.employeeId === employee.employeeId && 
+            record.date === new Date().toISOString().split('T')[0]
+          );
+          
+          if (existingRecord) {
+            updateAttendanceRecord(existingRecord.id, { status });
+          } else {
+            addAttendanceRecord({
+              employeeId: employee.employeeId,
+              name: employee.name,
+              checkIn: status === 'present' ? new Date().toLocaleTimeString() : '-',
+              checkOut: '-',
+              date: new Date().toISOString().split('T')[0],
+              status,
+              hours: '0h 0m'
+            });
+          }
+        }
+      },
+      
+      // Leave management quick actions
+      approveLeave: async (leaveId) => {
+        try {
+          await LeaveAPI.updateStatus(leaveId, { status: 'approved' });
+          setLeaveRequests(prev => 
+            prev.map(req => 
+              req.id === leaveId 
+                ? { ...req, status: 'approved' } 
+                : req
+            )
+          );
+        } catch (error) {
+          console.error('Failed to approve leave:', error);
+          throw error;
+        }
+      },
+      
+      rejectLeave: async (leaveId) => {
+        try {
+          await LeaveAPI.updateStatus(leaveId, { status: 'rejected' });
+          setLeaveRequests(prev => 
+            prev.map(req => 
+              req.id === leaveId 
+                ? { ...req, status: 'rejected' } 
+                : req
+            )
+          );
+        } catch (error) {
+          console.error('Failed to reject leave:', error);
+          throw error;
+        }
+      },
+      
+      // Task management quick actions
+      completeTask: (taskId) => {
+        updateTask(taskId, { status: 'completed' });
+      },
+      
+      createTask: (taskData) => {
+        return addTask({
+          ...taskData,
+          status: 'pending',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        });
+      },
+      
+      // Payroll quick actions
+      processPayroll: async (employeeIds, periodStart, periodEnd) => {
+        try {
+          return await PayrollAPI.process({
+            employeeIds,
+            periodStart,
+            periodEnd
+          });
+        } catch (error) {
+          console.error('Failed to process payroll:', error);
+          throw error;
+        }
+      }
+    }
   };
 
+  // Memoize the context value to prevent unnecessary re-renders
+  const contextValue = useMemo(() => value, [JSON.stringify(value)]);
+
   return (
-    <DataContext.Provider value={value}>
+    <DataContext.Provider value={contextValue}>
       {children}
     </DataContext.Provider>
   );
 };
+
+// Export the provider and hook
+export { DataProvider, useData };
