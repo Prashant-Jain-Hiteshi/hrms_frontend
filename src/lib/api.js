@@ -82,6 +82,7 @@ export const AttendanceAPI = {
   getOverallStats: (params = {}) => api.get('/attendance/overall-stats', { params }),
   getStatsByRange: (from, to) => api.get(`/attendance/stats-by-range?from=${from}&to=${to}`),
   addEmployeeAttendance: (attendanceData) => api.post('/attendance/add-employee-attendance', attendanceData),
+  getAttendanceForDate: (date) => api.get(`/attendance/date-details?date=${date}`),
 };
 
 // Leave endpoints
