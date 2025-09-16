@@ -61,6 +61,12 @@ const AttendanceManagement = () => {
   const [isAddingAttendance, setIsAddingAttendance] = useState(false);
   const [addAttendanceError, setAddAttendanceError] = useState('');
   const [viewStatus, setViewStatus] = useState(null); // sessions for the selected record's date
+  
+  // Date Details Modal State
+  const [showDateDetailsModal, setShowDateDetailsModal] = useState(false);
+  const [selectedDateDetails, setSelectedDateDetails] = useState(null);
+  const [dateDetailsLoading, setDateDetailsLoading] = useState(false);
+  
   // Month/Year selection for Monthly Calendar
   const init = new Date();
   const [selectedMonth, setSelectedMonth] = useState(init.getMonth()); // 0-11
@@ -237,6 +243,26 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
     }
   };
 
+  // Handle date click to show attendance details
+  const handleDateClick = async (date) => {
+    setDateDetailsLoading(true);
+    setShowDateDetailsModal(true);
+    setSelectedDateDetails(null);
+
+    try {
+      const response = await AttendanceAPI.getAttendanceForDate(date);
+      setSelectedDateDetails(response.data);
+    } catch (error) {
+      console.error('Error fetching attendance details:', error);
+      setSelectedDateDetails({
+        error: 'Failed to load attendance details',
+        date: date
+      });
+    } finally {
+      setDateDetailsLoading(false);
+    }
+  };
+
   const openEditModal = (record) => {
     setSelectedRecord(record);
     setShowEditModal(true);
@@ -321,9 +347,15 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
   }, [selectedMonth, selectedYear]);
 
   useEffect(() => {
-    // Drive UI state from active session status
+    // Drive UI state from attendance status
     if (attendanceStatus) {
-      setIsCheckedIn(!!attendanceStatus.activeSession);
+      // Employee is considered "checked in" if:
+      // 1. They have an active session (ongoing check-in), OR
+      // 2. They have attendance for today (including HR/Admin added attendance) but no completed sessions yet
+      const hasActiveSession = !!attendanceStatus.activeSession;
+      const hasAttendanceButNoCompletedSessions = attendanceStatus.hasAttendanceToday && !attendanceStatus.hasCompletedSessions;
+      
+      setIsCheckedIn(hasActiveSession || hasAttendanceButNoCompletedSessions);
       setCheckInTime(attendanceStatus.sessionStartTime || null);
     }
   }, [attendanceStatus]);
@@ -1339,8 +1371,9 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
                       return (
                         <div
                           key={key}
-                          className={`p-2 rounded-lg text-center border dark:border-gray-800 ${isToday ? 'bg-gray-900 text-white dark:bg-gray-800' : 'hover:bg-gray-100 dark:hover:bg-gray-800'} ${rec ? 'cursor-pointer' : ''}`}
+                          className={`p-2 rounded-lg text-center border dark:border-gray-800 cursor-pointer transition-colors ${isToday ? 'bg-gray-900 text-white dark:bg-gray-800' : 'hover:bg-gray-100 dark:hover:bg-gray-800'}`}
                           title={title}
+                          onClick={() => handleDateClick(key)}
                         >
                           <div className="text-sm font-medium">{day}</div>
                           <div className="flex justify-center mt-1 h-2">
@@ -1770,6 +1803,121 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
                   )}
                 </Button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Date Details Modal */}
+      {showDateDetailsModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-900 rounded-lg shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-6 border-b dark:border-gray-700">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                Attendance Details
+              </h3>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowDateDetailsModal(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-6">
+              {dateDetailsLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <div className="w-8 h-8 border-4 border-gray-300 border-t-blue-500 rounded-full animate-spin"></div>
+                  <span className="ml-3 text-gray-600 dark:text-gray-400">Loading attendance details...</span>
+                </div>
+              ) : selectedDateDetails?.error ? (
+                <div className="text-center py-8">
+                  <div className="text-red-500 mb-2">
+                    <XCircle className="h-12 w-12 mx-auto" />
+                  </div>
+                  <p className="text-gray-600 dark:text-gray-400">{selectedDateDetails.error}</p>
+                </div>
+              ) : selectedDateDetails?.status === 'present' ? (
+                <div className="space-y-4">
+                  <div className="text-center mb-4">
+                    <div className="text-green-500 mb-2">
+                      <CheckCircle className="h-12 w-12 mx-auto" />
+                    </div>
+                    <h4 className="text-lg font-semibold text-gray-900 dark:text-white">Present</h4>
+                    <p className="text-gray-600 dark:text-gray-400">{selectedDateDetails.data.date}</p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-lg">
+                      <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 mb-1">
+                        <Clock className="h-4 w-4" />
+                        Punch In
+                      </div>
+                      <div className="text-lg font-semibold text-gray-900 dark:text-white">
+                        {selectedDateDetails.data.checkIn || 'N/A'}
+                      </div>
+                    </div>
+
+                    <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-lg">
+                      <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 mb-1">
+                        <Timer className="h-4 w-4" />
+                        Punch Out
+                      </div>
+                      <div className="text-lg font-semibold text-gray-900 dark:text-white">
+                        {selectedDateDetails.data.checkOut || 'Not checked out'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-lg">
+                    <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 mb-1">
+                      <Clock className="h-4 w-4" />
+                      Hours Worked
+                    </div>
+                    <div className="text-lg font-semibold text-gray-900 dark:text-white">
+                      {selectedDateDetails.data.hoursWorked ? `${selectedDateDetails.data.hoursWorked} hours` : 'N/A'}
+                    </div>
+                  </div>
+
+                  <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-lg">
+                    <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 mb-1">
+                      Status
+                    </div>
+                    <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                      selectedDateDetails.data.status === 'present' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' :
+                      selectedDateDetails.data.status === 'late' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200' :
+                      'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200'
+                    }`}>
+                      {selectedDateDetails.data.status?.charAt(0).toUpperCase() + selectedDateDetails.data.status?.slice(1) || 'N/A'}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-8">
+                  <div className="text-red-500 mb-2">
+                    <XCircle className="h-12 w-12 mx-auto" />
+                  </div>
+                  <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Absent</h4>
+                  <p className="text-gray-600 dark:text-gray-400">{selectedDateDetails?.data?.date}</p>
+                  <p className="text-gray-500 dark:text-gray-500 mt-2">
+                    {selectedDateDetails?.data?.message || 'On Leave / Absent'}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex justify-end p-6 border-t dark:border-gray-700">
+              <Button
+                variant="outline"
+                onClick={() => setShowDateDetailsModal(false)}
+              >
+                Close
+              </Button>
             </div>
           </div>
         </div>
