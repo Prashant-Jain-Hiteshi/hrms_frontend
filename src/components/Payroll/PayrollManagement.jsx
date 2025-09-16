@@ -10,6 +10,7 @@ import {
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
 import { useAuth } from '../../contexts/AuthContext';
 import { useData } from '../../contexts/DataContext';
+import PayrollProgressChart from './PayrollProgressChart';
 
 const PayrollManagement = () => {
   const { user } = useAuth();
@@ -441,25 +442,10 @@ const PayrollManagement = () => {
 
           {/* Charts */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Payroll Trends</CardTitle>
-                <CardDescription>Monthly payroll breakdown</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={payrollData}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="month" />
-                    <YAxis />
-                    <Tooltip formatter={(value) => [`$${value.toLocaleString()}`, '']} />
-                    <Bar dataKey="gross" fill="#3b82f6" name="Gross Pay" />
-                    <Bar dataKey="net" fill="#10b981" name="Net Pay" />
-                    <Bar dataKey="deductions" fill="#ef4444" name="Deductions" />
-                  </BarChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
+            <PayrollProgressChart 
+              payrollData={employeePayroll} 
+              title="Payroll Processing Progress"
+            />
 
             <Card>
               <CardHeader>
