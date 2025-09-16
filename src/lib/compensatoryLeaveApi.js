@@ -1,4 +1,5 @@
 import { API_BASE_URL } from './config';
+import { TOKEN_KEY } from './api';
 
 class CompensatoryLeaveAPI {
   constructor() {
@@ -7,7 +8,7 @@ class CompensatoryLeaveAPI {
 
   // Get auth headers
   getAuthHeaders() {
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem(TOKEN_KEY);
     return {
       'Content-Type': 'application/json',
       'Authorization': token ? `Bearer ${token}` : '',

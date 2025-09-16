@@ -42,41 +42,15 @@ const LeaveManagement = () => {
   const [showCalendarModal, setShowCalendarModal] = useState(false);
 
   // Compensatory Leave state (HR only)
-  const [compensatoryLeaves, setCompensatoryLeaves] = useState([
-    {
-      id: 1,
-      employeeId: 'EMP001',
-      employeeName: 'John Doe',
-      department: 'Engineering',
-      credits: 2,
-      reason: 'Weekend work for project deadline',
-      assignedDate: '2025-08-15',
-      expiryDate: '2025-12-31',
-      status: 'active'
-    },
-    {
-      id: 2,
-      employeeId: 'EMP002',
-      employeeName: 'Jane Smith',
-      department: 'Marketing',
-      credits: 1,
-      reason: 'Holiday work for campaign launch',
-      assignedDate: '2025-08-20',
-      expiryDate: '2025-12-31',
-      status: 'active'
-    },
-    {
-      id: 3,
-      employeeId: 'EMP003',
-      employeeName: 'Mike Johnson',
-      department: 'Sales',
-      credits: 3,
-      reason: 'Extended hours during client presentation',
-      assignedDate: '2025-07-30',
-      expiryDate: '2025-11-30',
-      status: 'expired'
-    }
-  ]);
+  const [compensatoryLeaves, setCompensatoryLeaves] = useState([]);
+  const [compensatorySummary, setCompensatorySummary] = useState({
+    totalActiveCredits: 0,
+    totalEmployees: 0,
+    expiringSoon: 0,
+    totalExpired: 0,
+    totalUsed: 0
+  });
+  const [loadingCompensatory, setLoadingCompensatory] = useState(false);
   const [showCompensatoryForm, setShowCompensatoryForm] = useState(false);
   const [editingCompensatory, setEditingCompensatory] = useState(null);
   const [compensatoryForm, setCompensatoryForm] = useState({
@@ -109,47 +83,47 @@ const LeaveManagement = () => {
   };
 
   // Compensatory Leave CRUD functions
-  const handleCompensatorySubmit = (e) => {
+  const handleCompensatorySubmit = async (e) => {
     e.preventDefault();
-    const selectedEmployee = employees.find(emp => emp.id === parseInt(compensatoryForm.employeeId));
+    setLoadingCompensatory(true);
     
-    if (editingCompensatory) {
-      // Update existing
-      setCompensatoryLeaves(prev => prev.map(comp => 
-        comp.id === editingCompensatory.id 
-          ? {
-              ...comp,
-              employeeId: selectedEmployee?.employeeId || comp.employeeId,
-              employeeName: selectedEmployee?.name || comp.employeeName,
-              department: selectedEmployee?.department || comp.department,
-              credits: parseInt(compensatoryForm.credits),
-              reason: compensatoryForm.reason,
-              expiryDate: compensatoryForm.expiryDate
-            }
-          : comp
-      ));
-      notify({ type: 'success', message: 'Compensatory leave updated successfully' });
-    } else {
-      // Create new
-      const newComp = {
-        id: Math.max(...compensatoryLeaves.map(c => c.id), 0) + 1,
-        employeeId: selectedEmployee?.employeeId || `EMP${String(Math.floor(Math.random() * 1000)).padStart(3, '0')}`,
-        employeeName: selectedEmployee?.name || 'Unknown Employee',
-        department: selectedEmployee?.department || 'Unknown',
-        credits: parseInt(compensatoryForm.credits),
-        reason: compensatoryForm.reason,
-        assignedDate: new Date().toISOString().split('T')[0],
-        expiryDate: compensatoryForm.expiryDate,
-        status: 'active'
-      };
-      setCompensatoryLeaves(prev => [...prev, newComp]);
-      notify({ type: 'success', message: 'Compensatory leave assigned successfully' });
+    try {
+      const selectedEmployee = employees.find(emp => emp.id === parseInt(compensatoryForm.employeeId));
+      
+      if (editingCompensatory) {
+        // Update existing compensatory leave
+        const updateData = {
+          credits: parseFloat(compensatoryForm.credits),
+          reason: compensatoryForm.reason,
+          expiryDate: compensatoryForm.expiryDate
+        };
+        
+        await compensatoryLeaveAPI.update(editingCompensatory.id, updateData);
+      } else {
+        // Add new compensatory leave
+        const createData = {
+          employeeId: selectedEmployee?.id || compensatoryForm.employeeId,
+          credits: parseFloat(compensatoryForm.credits),
+          reason: compensatoryForm.reason,
+          expiryDate: compensatoryForm.expiryDate
+        };
+        
+        await compensatoryLeaveAPI.create(createData);
+      }
+      
+      // Refresh data
+      await fetchCompensatoryData();
+      
+      // Reset form
+      setCompensatoryForm({ employeeId: '', credits: '', reason: '', expiryDate: '' });
+      setShowCompensatoryForm(false);
+      setEditingCompensatory(null);
+    } catch (error) {
+      console.error('Error saving compensatory leave:', error);
+      alert('Error saving compensatory leave. Please try again.');
+    } finally {
+      setLoadingCompensatory(false);
     }
-    
-    // Reset form
-    setCompensatoryForm({ employeeId: '', credits: '', reason: '', expiryDate: '' });
-    setEditingCompensatory(null);
-    setShowCompensatoryForm(false);
   };
 
   const handleEditCompensatory = (comp) => {
@@ -164,10 +138,19 @@ const LeaveManagement = () => {
     setShowCompensatoryForm(true);
   };
 
-  const handleDeleteCompensatory = (id) => {
+  const handleDeleteCompensatory = async (id) => {
     if (window.confirm('Are you sure you want to delete this compensatory leave?')) {
-      setCompensatoryLeaves(prev => prev.filter(comp => comp.id !== id));
-      notify({ type: 'success', message: 'Compensatory leave deleted successfully' });
+      setLoadingCompensatory(true);
+      try {
+        await compensatoryLeaveAPI.delete(id);
+        await fetchCompensatoryData();
+        notify({ type: 'success', message: 'Compensatory leave deleted successfully' });
+      } catch (error) {
+        console.error('Error deleting compensatory leave:', error);
+        notify({ type: 'error', message: 'Error deleting compensatory leave. Please try again.' });
+      } finally {
+        setLoadingCompensatory(false);
+      }
     }
   };
 
@@ -910,6 +893,40 @@ const LeaveManagement = () => {
   };
 
   // Fetch backend monthly ledger when on Leave Balance tab or date changes
+  // Fetch compensatory leave data when HR/Admin accesses compensatory tab
+  useEffect(() => {
+    if (selectedTab === 'compensatory' && (isHR || isAdmin)) {
+      fetchCompensatoryData();
+    }
+  }, [selectedTab, isHR, isAdmin]);
+
+  // Fetch compensatory leave data
+  const fetchCompensatoryData = async () => {
+    setLoadingCompensatory(true);
+    try {
+      const [summaryData, leaveData] = await Promise.all([
+        compensatoryLeaveAPI.getSummary(),
+        compensatoryLeaveAPI.getAll()
+      ]);
+      
+      setCompensatorySummary(summaryData);
+      setCompensatoryLeaves(leaveData);
+    } catch (error) {
+      console.error('Error fetching compensatory leave data:', error);
+      // Fallback to empty data on error
+      setCompensatorySummary({
+        totalActiveCredits: 0,
+        totalEmployees: 0,
+        expiringSoon: 0,
+        totalExpired: 0,
+        totalUsed: 0
+      });
+      setCompensatoryLeaves([]);
+    } finally {
+      setLoadingCompensatory(false);
+    }
+  };
+
   useEffect(() => {
     if (selectedTab !== 'leavebalance') return;
     const load = async () => {
@@ -2226,7 +2243,7 @@ const LeaveManagement = () => {
                   <div className="ml-4">
                     <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Active Credits</p>
                     <p className="text-2xl font-bold text-gray-900 dark:text-white">
-                      {compensatoryLeaves.filter(c => c.status === 'active').reduce((sum, c) => sum + c.credits, 0)}
+                      {loadingCompensatory ? '...' : compensatorySummary.totalActiveCredits}
                     </p>
                   </div>
                 </div>
@@ -2242,7 +2259,7 @@ const LeaveManagement = () => {
                   <div className="ml-4">
                     <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Employees</p>
                     <p className="text-2xl font-bold text-gray-900 dark:text-white">
-                      {new Set(compensatoryLeaves.filter(c => c.status === 'active').map(c => c.employeeId)).size}
+                      {loadingCompensatory ? '...' : compensatorySummary.totalEmployees}
                     </p>
                   </div>
                 </div>
@@ -2258,13 +2275,7 @@ const LeaveManagement = () => {
                   <div className="ml-4">
                     <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Expiring Soon</p>
                     <p className="text-2xl font-bold text-gray-900 dark:text-white">
-                      {compensatoryLeaves.filter(c => {
-                        const expiry = new Date(c.expiryDate);
-                        const today = new Date();
-                        const diffTime = expiry - today;
-                        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                        return c.status === 'active' && diffDays <= 30 && diffDays > 0;
-                      }).length}
+                      {loadingCompensatory ? '...' : compensatorySummary.expiringSoon}
                     </p>
                   </div>
                 </div>
