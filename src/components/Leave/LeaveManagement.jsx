@@ -14,6 +14,7 @@ import { AttendanceAPI } from '../../lib/api';
 import { CalendarAPI } from '../../lib/api';
 import { compensatoryLeaveAPI } from '../../lib/compensatoryLeaveApi';
 import LeaveTypes from './LeaveTypes';
+import LeaveTypesChart from './LeaveTypesChart';
 
 const LeaveManagement = () => {
   const { user } = useAuth();
@@ -1544,32 +1545,11 @@ const LeaveManagement = () => {
 
           {/* Charts */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Leave Types Distribution</CardTitle>
-                <CardDescription>Breakdown of leave requests by type</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <PieChart>
-                    <Pie
-                      data={leaveTypeData}
-                      cx="50%"
-                      cy="50%"
-                      outerRadius={80}
-                      fill="#8884d8"
-                      dataKey="value"
-                      label={({ name, value }) => `${name}: ${value}`}
-                    >
-                      {leaveTypeData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip />
-                  </PieChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
+            <LeaveTypesChart 
+              leaveData={leaveTypeData} 
+              title="Leave Types Distribution"
+              chartType="pie"
+            />
 
             <Card>
               <CardHeader>

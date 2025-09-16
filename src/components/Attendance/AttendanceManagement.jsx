@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
-import { Users, Clock, Timer, Search, Filter, CheckCircle, XCircle, Eye, Download, Calendar } from 'lucide-react';
+import { Users, Clock, Timer, Search, Filter, CheckCircle, XCircle, Eye, Download, Calendar, Plus, User, Save, X } from 'lucide-react';
  
 import { useAuth } from '../../contexts/AuthContext';
 import { useEffect } from 'react';
@@ -48,13 +48,112 @@ const AttendanceManagement = () => {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [confirmType, setConfirmType] = useState(null); // 'checkin' | 'checkout'
+  
+  // Add Employee Attendance Modal State
+  const [showAddAttendanceModal, setShowAddAttendanceModal] = useState(false);
+  const [addAttendanceForm, setAddAttendanceForm] = useState({
+    employeeId: '',
+    date: new Date().toISOString().split('T')[0],
+    checkInTime: '',
+    checkOutTime: '',
+    description: ''
+  });
+  const [isAddingAttendance, setIsAddingAttendance] = useState(false);
+  const [addAttendanceError, setAddAttendanceError] = useState('');
   const [viewStatus, setViewStatus] = useState(null); // sessions for the selected record's date
   // Month/Year selection for Monthly Calendar
   const init = new Date();
   const [selectedMonth, setSelectedMonth] = useState(init.getMonth()); // 0-11
   const [selectedYear, setSelectedYear] = useState(init.getFullYear());
-
   
+  // State for attendance summary data
+  const [attendanceTotals, setAttendanceTotals] = useState({
+    present: 0,
+    absent: 0,
+    late: 0,
+    totalWorkingDays: 0,
+    attendancePercentage: '0.00'
+  });
+  const [totalsLoading, setTotalsLoading] = useState(false);
+
+  // Function to fetch attendance totals for the selected month
+  const fetchAttendanceTotals = async () => {
+    if (!user?.employeeId) return;
+    
+    setTotalsLoading(true);
+    try {
+      // Calculate date range for the selected month
+      const firstDay = new Date(selectedYear, selectedMonth, 1);
+      const lastDay = new Date(selectedYear, selectedMonth + 1, 0);
+      const from = firstDay.toISOString().split('T')[0]; // YYYY-MM-DD
+      const to = lastDay.toISOString().split('T')[0]; // YYYY-MM-DD
+      
+      const response = await AttendanceAPI.getEmployeeSummary({
+        employeeId: user.employeeId,
+        from,
+        to
+      });
+      
+      if (response.data) {
+        setAttendanceTotals({
+          present: response.data.presentDays || 0,
+          absent: response.data.absentDays || 0,
+          late: response.data.lateDays || 0,
+          totalWorkingDays: response.data.totalWorkingDays || 0,
+          attendancePercentage: response.data.attendancePercentage || '0.00'
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching attendance totals:', error);
+      // Fallback to existing calculation if API fails
+      calculateTotalsFromExistingData();
+    } finally {
+      setTotalsLoading(false);
+    }
+  };
+
+  // Fallback function to calculate totals from existing myAttendance data
+  const calculateTotalsFromExistingData = () => {
+    const map = new Map((myAttendance || []).map(r => [r.date, r]));
+    const first = new Date(selectedYear, selectedMonth, 1);
+    const last = new Date(selectedYear, selectedMonth + 1, 0);
+    let present = 0, absent = 0, late = 0;
+    const toKey = (dt) => `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`;
+    
+    for (let d = new Date(first); d <= last; d.setDate(d.getDate() + 1)) {
+      // Skip weekends (assuming Monday-Friday work week)
+      if (d.getDay() === 0 || d.getDay() === 6) continue;
+      
+      const key = toKey(d);
+      const rec = map.get(key);
+      if (!rec) {
+        absent++;
+        continue;
+      }
+      const status = (rec.status || '').toLowerCase();
+      if (status === 'present') present++;
+      else if (status === 'late') late++;
+      else if (status === 'absent') absent++;
+    }
+    
+    const totalWorkingDays = present + absent + late;
+    const attendancePercentage = totalWorkingDays > 0 ? ((present + late) / totalWorkingDays * 100).toFixed(2) : '0.00';
+    
+    setAttendanceTotals({
+      present,
+      absent,
+      late,
+      totalWorkingDays,
+      attendancePercentage
+    });
+  };
+
+  // Effect to fetch totals when month/year changes
+  useEffect(() => {
+    if (user?.employeeId) {
+      fetchAttendanceTotals();
+    }
+  }, [selectedMonth, selectedYear, user?.employeeId]);
 
   const handleEditRecord = (recordData) => {
     // For now, local-only edit modal; backend update not implemented here
@@ -553,6 +652,115 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
     setReportOpen(false);
   };
 
+  // Add Employee Attendance Handler Functions
+  const handleAddAttendanceFormChange = (field, value) => {
+    setAddAttendanceForm(prev => ({
+      ...prev,
+      [field]: value
+    }));
+    // Clear error when user starts typing
+    if (addAttendanceError) {
+      setAddAttendanceError('');
+    }
+  };
+
+  const validateAddAttendanceForm = () => {
+    const { employeeId, date, checkInTime } = addAttendanceForm;
+    
+    if (!employeeId) {
+      setAddAttendanceError('Please select an employee');
+      return false;
+    }
+    
+    if (!date) {
+      setAddAttendanceError('Please select a date');
+      return false;
+    }
+    
+    if (!checkInTime) {
+      setAddAttendanceError('Please enter check-in time');
+      return false;
+    }
+
+    // Validate date is not in the future
+    const selectedDate = new Date(date);
+    const today = new Date();
+    today.setHours(23, 59, 59, 999); // End of today
+    
+    if (selectedDate > today) {
+      setAddAttendanceError('Cannot add attendance for future dates');
+      return false;
+    }
+
+    // Validate check-out time is after check-in time if provided
+    if (addAttendanceForm.checkOutTime) {
+      const checkIn = new Date(`${date}T${checkInTime}`);
+      const checkOut = new Date(`${date}T${addAttendanceForm.checkOutTime}`);
+      
+      if (checkOut <= checkIn) {
+        setAddAttendanceError('Check-out time must be after check-in time');
+        return false;
+      }
+    }
+
+    return true;
+  };
+
+  const handleAddAttendanceSubmit = async () => {
+    if (!validateAddAttendanceForm()) {
+      return;
+    }
+
+    setIsAddingAttendance(true);
+    setAddAttendanceError('');
+
+    try {
+      const { employeeId, date, checkInTime, checkOutTime, description } = addAttendanceForm;
+      
+      // Format the data for API
+      const attendanceData = {
+        employeeId,
+        date,
+        checkIn: checkInTime,
+        checkOut: checkOutTime || null,
+        description: description || 'Added by HR/Admin',
+        status: checkOutTime ? 'present' : 'present' // Will be calculated by backend
+      };
+
+      // Call API to add attendance (we'll need to add this endpoint)
+      await AttendanceAPI.addEmployeeAttendance(attendanceData);
+
+      // Refresh attendance data
+      if (fetchAllAttendance) {
+        await fetchAllAttendance();
+      }
+      if (fetchMyAttendance) {
+        await fetchMyAttendance();
+      }
+
+      // Reset form and close modal
+      setAddAttendanceForm({
+        employeeId: '',
+        date: new Date().toISOString().split('T')[0],
+        checkInTime: '',
+        checkOutTime: '',
+        description: ''
+      });
+      setShowAddAttendanceModal(false);
+      
+      alert('Employee attendance added successfully!');
+      
+    } catch (error) {
+      console.error('Error adding employee attendance:', error);
+      setAddAttendanceError(
+        error.response?.data?.message || 
+        'Failed to add employee attendance. Please try again.'
+      );
+    } finally {
+      setIsAddingAttendance(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -562,6 +770,27 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
           <p className="text-gray-600 dark:text-gray-400">Track and manage employee attendance</p>
         </div>
         <div className="flex space-x-3">
+          {/* Add Employee Attendance Button - Only for HR and Admin */}
+          {(user?.role === 'admin' || user?.role === 'hr') && (
+            <Button 
+              variant="outline" 
+              className="flex items-center space-x-2 bg-green-50 hover:bg-green-100 text-green-700 border-green-200" 
+              onClick={() => {
+                setAddAttendanceForm({
+                  employeeId: '',
+                  date: new Date().toISOString().split('T')[0],
+                  checkInTime: '',
+                  checkOutTime: '',
+                  description: ''
+                });
+                setAddAttendanceError('');
+                setShowAddAttendanceModal(true);
+              }}
+            >
+              <Plus className="h-4 w-4" />
+              <span>Add Employee Attendance</span>
+            </Button>
+          )}
           <Button variant="outline" className="flex items-center space-x-2" onClick={handleExportAttendance}>
             <Download className="h-4 w-4" />
             <span>Export</span>
@@ -974,29 +1203,32 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
               {/* Totals and month/year picker aligned horizontally */}
               <div className="flex flex-wrap items-center gap-4">
                 {/* Totals */}
-                {(() => {
-                  const map = new Map((myAttendance || []).map(r => [r.date, r]));
-                  const first = new Date(selectedYear, selectedMonth, 1);
-                  const last = new Date(selectedYear, selectedMonth + 1, 0);
-                  let present = 0, absent = 0, late = 0;
-                  const toKey = (dt) => `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`;
-                  for (let d = new Date(first); d <= last; d.setDate(d.getDate() + 1)) {
-                    const key = toKey(d);
-                    const rec = map.get(key);
-                    if (!rec) continue;
-                    const status = (rec.status || '').toLowerCase();
-                    if (status === 'present') present++;
-                    else if (status === 'late') late++;
-                    else if (status === 'absent') absent++;
-                  }
-                  return (
-                    <div className="flex items-center gap-4 text-sm">
-                      <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full bg-green-500"></span><span>Present: {present}</span></div>
-                      <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full bg-red-500"></span><span>Absent: {absent}</span></div>
-                      <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full bg-yellow-500"></span><span>Late: {late}</span></div>
+                <div className="flex items-center gap-4 text-sm">
+                  {totalsLoading ? (
+                    <div className="flex items-center gap-2 text-gray-500">
+                      <div className="w-4 h-4 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin"></div>
+                      <span>Loading totals...</span>
                     </div>
-                  );
-                })()}
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <span className="w-3 h-3 rounded-full bg-green-500"></span>
+                        <span>Present: {attendanceTotals.present}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="w-3 h-3 rounded-full bg-red-500"></span>
+                        <span>Absent: {attendanceTotals.absent}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="w-3 h-3 rounded-full bg-yellow-500"></span>
+                        <span>Late: {attendanceTotals.late}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
+                        <span>Attendance: {attendanceTotals.attendancePercentage}%</span>
+                      </div>
+                    </>
+                  )}
+                </div>
                 {/* Picker */}
                 <div className="flex items-center gap-2">
                   {(() => {
@@ -1366,6 +1598,178 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
             <div className="flex justify-end gap-3 mt-6">
               <Button variant="outline" onClick={() => setReportOpen(false)}>Cancel</Button>
               <Button onClick={handleGenerateReport}>Generate</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Employee Attendance Modal */}
+      {showAddAttendanceModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-900 rounded-lg w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              {/* Modal Header */}
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <h3 className="text-xl font-semibold text-gray-900 dark:text-white">Add Employee Attendance</h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Manually add attendance record for an employee</p>
+                </div>
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={() => setShowAddAttendanceModal(false)}
+                  disabled={isAddingAttendance}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+
+              {/* Error Message */}
+              {addAttendanceError && (
+                <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
+                  <p className="text-sm text-red-600">{addAttendanceError}</p>
+                </div>
+              )}
+
+              {/* Form */}
+              <div className="space-y-6">
+                {/* Employee Selection */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    <User className="h-4 w-4 inline mr-1" />
+                    Select Employee *
+                  </label>
+                  <select
+                    value={addAttendanceForm.employeeId}
+                    onChange={(e) => handleAddAttendanceFormChange('employeeId', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-white"
+                    disabled={isAddingAttendance}
+                  >
+                    <option value="">Choose an employee...</option>
+                    {(employees || [])
+                      .filter(emp => emp?.status === 'active')
+                      .map(employee => (
+                        <option key={employee.id} value={employee.id}>
+                          {employee.firstName} {employee.lastName} - {employee.email}
+                        </option>
+                      ))
+                    }
+                  </select>
+                </div>
+
+                {/* Date Picker */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    <Calendar className="h-4 w-4 inline mr-1" />
+                    Date *
+                  </label>
+                  <Input
+                    type="date"
+                    value={addAttendanceForm.date}
+                    onChange={(e) => handleAddAttendanceFormChange('date', e.target.value)}
+                    max={new Date().toISOString().split('T')[0]} // Prevent future dates
+                    disabled={isAddingAttendance}
+                    className="w-full"
+                  />
+                </div>
+
+                {/* Time Fields */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Check-in Time */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      <Clock className="h-4 w-4 inline mr-1" />
+                      Punch In Time *
+                    </label>
+                    <Input
+                      type="time"
+                      value={addAttendanceForm.checkInTime}
+                      onChange={(e) => handleAddAttendanceFormChange('checkInTime', e.target.value)}
+                      disabled={isAddingAttendance}
+                      className="w-full"
+                    />
+                  </div>
+
+                  {/* Check-out Time */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      <Timer className="h-4 w-4 inline mr-1" />
+                      Punch Out Time
+                    </label>
+                    <Input
+                      type="time"
+                      value={addAttendanceForm.checkOutTime}
+                      onChange={(e) => handleAddAttendanceFormChange('checkOutTime', e.target.value)}
+                      disabled={isAddingAttendance}
+                      className="w-full"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">Leave empty if employee hasn't checked out yet</p>
+                  </div>
+                </div>
+
+                {/* Description */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Description
+                  </label>
+                  <textarea
+                    value={addAttendanceForm.description}
+                    onChange={(e) => handleAddAttendanceFormChange('description', e.target.value)}
+                    placeholder="Optional notes about this attendance record..."
+                    rows={3}
+                    disabled={isAddingAttendance}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-white resize-none"
+                  />
+                </div>
+
+                {/* Info Box */}
+                <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md p-4">
+                  <div className="flex items-start space-x-2">
+                    <div className="flex-shrink-0">
+                      <div className="w-5 h-5 bg-blue-500 rounded-full flex items-center justify-center">
+                        <span className="text-white text-xs font-bold">i</span>
+                      </div>
+                    </div>
+                    <div className="text-sm text-blue-700 dark:text-blue-300">
+                      <p className="font-medium mb-1">Important Notes:</p>
+                      <ul className="list-disc list-inside space-y-1 text-xs">
+                        <li>This will create an attendance record that the employee can see</li>
+                        <li>The employee will be able to view this attendance in their calendar</li>
+                        <li>Punch out time is optional - leave empty for ongoing attendance</li>
+                        <li>Cannot add attendance for future dates</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Modal Footer */}
+              <div className="flex justify-end space-x-3 mt-8 pt-6 border-t border-gray-200 dark:border-gray-700">
+                <Button 
+                  variant="outline" 
+                  onClick={() => setShowAddAttendanceModal(false)}
+                  disabled={isAddingAttendance}
+                >
+                  Cancel
+                </Button>
+                <Button 
+                  onClick={handleAddAttendanceSubmit}
+                  disabled={isAddingAttendance}
+                  className="flex items-center space-x-2"
+                >
+                  {isAddingAttendance ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      <span>Adding...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="h-4 w-4" />
+                      <span>Add Attendance</span>
+                    </>
+                  )}
+                </Button>
+              </div>
             </div>
           </div>
         </div>

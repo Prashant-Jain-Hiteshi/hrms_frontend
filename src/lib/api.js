@@ -28,8 +28,7 @@ api.interceptors.response.use(
     if (error?.response?.status === 401) {
       // Best-effort cleanup
       localStorage.removeItem(TOKEN_KEY);
-      // Optionally keep user for redirect context, but typically clear it too
-      // localStorage.removeItem(USER_KEY);
+0      // localStorage.removeItem(USER_KEY);
       // Redirect to login if we are in browser context
       if (typeof window !== 'undefined' && window.location) {
         if (!window.location.pathname.includes('/login')) {
@@ -78,6 +77,11 @@ export const AttendanceAPI = {
     const res = await api.get('/attendance/report', { params, responseType: 'blob' });
     return res.data; // blob
   },
+  // New endpoints for total present/absent data
+  getEmployeeSummary: (params = {}) => api.get('/attendance/employee-summary', { params }),
+  getOverallStats: (params = {}) => api.get('/attendance/overall-stats', { params }),
+  getStatsByRange: (from, to) => api.get(`/attendance/stats-by-range?from=${from}&to=${to}`),
+  addEmployeeAttendance: (attendanceData) => api.post('/attendance/add-employee-attendance', attendanceData),
 };
 
 // Leave endpoints
@@ -96,6 +100,25 @@ export const LeaveAPI = {
 };
 
 // Leave Calendar (Admin): holidays, weekends, working-days
+// Department endpoints
+export const DepartmentAPI = {
+  list: (params = {}) => api.get('/departments', { params }),
+  get: (id) => api.get(`/departments/${id}`),
+  create: (data) => api.post('/departments', data),
+  update: (id, data) => api.put(`/departments/${id}`, data),
+  delete: (id) => api.delete(`/departments/${id}`),
+};
+
+// Payroll endpoints
+export const PayrollAPI = {
+  list: (params = {}) => api.get('/payroll', { params }),
+  get: (id) => api.get(`/payroll/${id}`),
+  create: (data) => api.post('/payroll', data),
+  update: (id, data) => api.put(`/payroll/${id}`, data),
+  delete: (id) => api.delete(`/payroll/${id}`),
+  process: (data) => api.post('/payroll/process', data),
+};
+
 export const CalendarAPI = {
   holidays: {
     list: (params = {}) => api.get('/leave/calendar/holidays', { params }),
