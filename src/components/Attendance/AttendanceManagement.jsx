@@ -1445,10 +1445,40 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
                   <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Total Hours</label>
                   {(() => {
                     const isSelfToday = (user?.role === 'employee') && (selectedRecord.date === today);
-                    const secs = isSelfToday
-                      ? totalSecondsFromSessions()
-                      : totalSecondsFromSessionsGeneric(viewStatus?.sessions || []);
-                    return <p className="text-gray-900 dark:text-white font-bold text-lg">{formatSec(secs)}</p>;
+                    
+                    // If there are sessions, use session-based calculation
+                    const sessions = viewStatus?.sessions || [];
+                    if (sessions.length > 0) {
+                      const secs = isSelfToday
+                        ? totalSecondsFromSessions()
+                        : totalSecondsFromSessionsGeneric(sessions);
+                      return <p className="text-gray-900 dark:text-white font-bold text-lg">{formatSec(secs)}</p>;
+                    }
+                    
+                    // For manually added attendance (no sessions), calculate from checkIn/checkOut
+                    const attendance = viewStatus?.attendance || selectedRecord;
+                    if (attendance.checkIn && attendance.checkOut) {
+                      const checkInTime = attendance.checkIn;
+                      const checkOutTime = attendance.checkOut;
+                      
+                      // Calculate hours from time strings
+                      const parseTime = (timeStr) => {
+                        if (!timeStr || timeStr === '-') return null;
+                        const [hours, minutes, seconds = 0] = timeStr.split(':').map(Number);
+                        return hours * 3600 + minutes * 60 + (seconds || 0);
+                      };
+                      
+                      const startSec = parseTime(checkInTime);
+                      const endSec = parseTime(checkOutTime);
+                      
+                      if (startSec !== null && endSec !== null && endSec > startSec) {
+                        const totalSecs = endSec - startSec;
+                        return <p className="text-gray-900 dark:text-white font-bold text-lg">{formatSec(totalSecs)}</p>;
+                      }
+                    }
+                    
+                    // Fallback to 00:00:00 if no valid data
+                    return <p className="text-gray-900 dark:text-white font-bold text-lg">00:00:00</p>;
                   })()}
                 </div>
               </div>
@@ -1460,29 +1490,64 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
                   <div className="min-w-full md:min-w-[600px] space-y-2">
                     {(() => {
                       const isSelfToday = (user?.role === 'employee') && (selectedRecord.date === today);
-                      const list = isSelfToday ? todaySessions : (viewStatus?.sessions || []);
-                      return list.length ?
-                        list.map((s, i) => {
-                          const sSec = parseHMS(s.startTime);
-                          const eSec = s.endTime ? parseHMS(s.endTime) : null;
+                      const sessions = isSelfToday ? todaySessions : (viewStatus?.sessions || []);
+                      
+                      // If no sessions but we have checkIn/checkOut from manually added attendance, create synthetic session
+                      if (sessions.length === 0) {
+                        const attendance = viewStatus?.attendance || selectedRecord;
+                        if (attendance.checkIn && attendance.checkIn !== '-') {
+                          const syntheticSession = {
+                            id: 'synthetic-1',
+                            startTime: attendance.checkIn,
+                            endTime: attendance.checkOut && attendance.checkOut !== '-' ? attendance.checkOut : null,
+                            isSynthetic: true
+                          };
+                          
+                          const sSec = parseHMS(syntheticSession.startTime);
+                          const eSec = syntheticSession.endTime ? parseHMS(syntheticSession.endTime) : null;
                           const dur = (sSec !== null) ? (eSec !== null ? Math.max(0, eSec - sSec) : 0) : 0;
-                          const canEdit = (user?.role === 'admin' || user?.role === 'hr') && !isSelfToday; // admin/hr editing others
+                          
                           return (
-                            <SessionRow
-                              key={s.id || i}
-                              index={i}
-                              session={s}
-                              durationLabel={formatSec(dur)}
-                              canEdit={canEdit}
-                              onSave={async (updated) => {
-                                await AttendanceAPI.updateSession({ sessionId: s.id, startTime: updated.startTime, endTime: updated.endTime });
-                                await refreshViewStatus();
-                              }}
-                            />
+                            <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-md text-sm border border-blue-200 dark:border-blue-800">
+                              <div className="flex items-center justify-between">
+                                <span className="font-medium text-blue-800 dark:text-blue-300">Manual Entry</span>
+                                <span className="text-blue-700 dark:text-blue-300">
+                                  {syntheticSession.startTime} → {syntheticSession.endTime || 'No checkout'}
+                                </span>
+                                <span className="font-medium text-blue-800 dark:text-blue-300">{formatSec(dur)}</span>
+                              </div>
+                              <div className="text-xs text-blue-600 dark:text-blue-400 mt-1">
+                                This attendance was manually added by HR/Admin
+                              </div>
+                            </div>
                           );
-                        }) : (
-                        <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-md text-sm text-gray-500">No sessions</div>
-                      );
+                        }
+                        
+                        return (
+                          <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-md text-sm text-gray-500">No sessions</div>
+                        );
+                      }
+                      
+                      // Display actual sessions
+                      return sessions.map((s, i) => {
+                        const sSec = parseHMS(s.startTime);
+                        const eSec = s.endTime ? parseHMS(s.endTime) : null;
+                        const dur = (sSec !== null) ? (eSec !== null ? Math.max(0, eSec - sSec) : 0) : 0;
+                        const canEdit = (user?.role === 'admin' || user?.role === 'hr') && !isSelfToday; // admin/hr editing others
+                        return (
+                          <SessionRow
+                            key={s.id || i}
+                            index={i}
+                            session={s}
+                            durationLabel={formatSec(dur)}
+                            canEdit={canEdit}
+                            onSave={async (updated) => {
+                              await AttendanceAPI.updateSession({ sessionId: s.id, startTime: updated.startTime, endTime: updated.endTime });
+                              await refreshViewStatus();
+                            }}
+                          />
+                        );
+                      });
                     })()}
                   </div>
                 </div>
@@ -1682,8 +1747,8 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
                     {(employees || [])
                       .filter(emp => emp?.status === 'active')
                       .map(employee => (
-                        <option key={employee.id} value={employee.id}>
-                          {employee.firstName} {employee.lastName} - {employee.email}
+                        <option key={employee.id} value={employee.employeeId}>
+                          {employee.name} ({employee.employeeId}) - {employee.email}
                         </option>
                       ))
                     }

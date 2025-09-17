@@ -616,11 +616,11 @@ const LeaveManagement = () => {
   // Export ledger (Leave Balance) CSV
   const generateLedgerCSV = (rows) => {
     const headers = [
-      'Month', 'Opening', 'Monthly Credit', 'Extra Credit', 'Compensatory', 'Deducted', 'LWP', 'Closing',
+      'Month', 'Opening', 'Monthly Credit', 'Extra Credit', 'Deducted', 'LWP', 'Closing',
       'Present', 'Absent', 'Effective Present', 'Effective Absent', 'Paid Days'
     ];
     const dataRows = rows.map(r => [
-      r.label, r.opening, r.monthlyCredit, r.extraCredit, r.compensatory, r.deducted, r.lwp, r.closing,
+      r.label, r.opening, r.monthlyCredit, r.extraCredit, r.deducted, r.lwp, r.closing,
       r.present, r.absent, r.effPresent, r.effAbsent, r.paidDays
     ]);
     return [headers, ...dataRows].map(row => row.join(',')).join('\n');
@@ -942,9 +942,13 @@ const LeaveManagement = () => {
           if (!key) continue;
           const deducted = Number(it?.deducted ?? it?.paid ?? it?.paidDays ?? 0);
           const lwp = Number(it?.lwp ?? it?.unpaid ?? it?.unpaidDays ?? 0);
+          const extraCredit = Number(it?.extraCredit ?? 0);
+          const extraCreditBreakdown = it?.extraCreditBreakdown || '';
           map[key] = {
             deducted: Number.isFinite(deducted) ? Number(deducted.toFixed(2)) : 0,
             lwp: Number.isFinite(lwp) ? Number(lwp.toFixed(2)) : 0,
+            extraCredit: Number.isFinite(extraCredit) ? Number(extraCredit.toFixed(2)) : 0,
+            extraCreditBreakdown: extraCreditBreakdown,
           };
         }
         setBackendLedger(map);
@@ -1064,9 +1068,14 @@ const LeaveManagement = () => {
     let opening = 0;
     const rows = months.map(({ ym, label }) => {
       const be = backendLedger[ym] || {};
-      const extra = Number(extraCreditsByMonth[ym] || 0);
-      const compensatory = Number(compensatoryMap[ym] || 0);
-      const credit = monthlyCredit + extra + compensatory;
+      // Combine extra credits and compensatory credits into one "Extra Credit" column
+      const extraFromLocal = Number(extraCreditsByMonth[ym] || 0);
+      const extraFromBackend = Number(be.extraCredit || 0);
+      const compensatoryFromLocal = Number(compensatoryMap[ym] || 0);
+      
+      // Use backend data if available, otherwise fall back to local calculation
+      const totalExtraCredit = extraFromBackend || (extraFromLocal + compensatoryFromLocal);
+      const credit = monthlyCredit + totalExtraCredit;
       const totalAvailable = opening + credit;
       
       // Get raw leave days (all approved leaves for this month)
@@ -1104,8 +1113,7 @@ const LeaveManagement = () => {
         ym, label,
         opening: Number(opening.toFixed(2)),
         monthlyCredit: isCurrent ? '-' : Number(monthlyCredit.toFixed(2)),
-        extraCredit: isCurrent ? '-' : Number(extra.toFixed(2)),
-        compensatory: isCurrent ? '-' : Number(compensatory.toFixed(2)),
+        extraCredit: isCurrent ? '-' : Number(totalExtraCredit.toFixed(2)),
         deducted: Number(deducted.toFixed(2)),
         lwp: Number(lwp.toFixed(2)),
         closing: isCurrent ? '-' : closing,
@@ -1231,7 +1239,6 @@ const LeaveManagement = () => {
                       <th className="text-left py-3 px-4">Opening</th>
                       <th className="text-left py-3 px-4">Monthly Credit</th>
                       <th className="text-left py-3 px-4">Extra Credit</th>
-                      <th className="text-left py-3 px-4">Compensatory</th>
                       <th className="text-left py-3 px-4">Deducted</th>
                       <th className="text-left py-3 px-4">LWP</th>
                       <th className="text-left py-3 px-4">Closing</th>
@@ -1245,7 +1252,7 @@ const LeaveManagement = () => {
                   <tbody>
                     {ledgerRows.length === 0 && (
                       <tr>
-                        <td colSpan={12} className="py-8 px-4 text-center text-gray-500">No data</td>
+                        <td colSpan={11} className="py-8 px-4 text-center text-gray-500">No data</td>
                       </tr>
                     )}
                     {ledgerRows.map((row) => (
@@ -1253,10 +1260,9 @@ const LeaveManagement = () => {
                         <td className="py-3 px-4 whitespace-nowrap">{row.label}</td>
                         <td className="py-3 px-4">{row.opening}</td>
                         <td className="py-3 px-4">{row.monthlyCredit}</td>
-                        <td className="py-3 px-4">{row.extraCredit}</td>
                         <td className="py-3 px-4">
-                          <span className={row.compensatory > 0 ? "text-green-600 dark:text-green-400 font-medium" : ""}>
-                            {row.compensatory}
+                          <span className={row.extraCredit > 0 ? "text-green-600 dark:text-green-400 font-medium" : ""}>
+                            {row.extraCredit}
                           </span>
                         </td>
                         <td className="py-3 px-4">{row.deducted}</td>
