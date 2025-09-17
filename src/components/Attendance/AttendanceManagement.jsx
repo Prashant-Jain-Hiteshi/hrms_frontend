@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
-import { Users, Clock, Timer, Search, Filter, CheckCircle, XCircle, Eye, Download, Calendar } from 'lucide-react';
+import { Users, Clock, Timer, Search, Filter, CheckCircle, XCircle, Eye, Download, Calendar, Plus, User, Save, X } from 'lucide-react';
  
 import { useAuth } from '../../contexts/AuthContext';
 import { useEffect } from 'react';
@@ -48,13 +48,118 @@ const AttendanceManagement = () => {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [confirmType, setConfirmType] = useState(null); // 'checkin' | 'checkout'
+  
+  // Add Employee Attendance Modal State
+  const [showAddAttendanceModal, setShowAddAttendanceModal] = useState(false);
+  const [addAttendanceForm, setAddAttendanceForm] = useState({
+    employeeId: '',
+    date: new Date().toISOString().split('T')[0],
+    checkInTime: '',
+    checkOutTime: '',
+    description: ''
+  });
+  const [isAddingAttendance, setIsAddingAttendance] = useState(false);
+  const [addAttendanceError, setAddAttendanceError] = useState('');
   const [viewStatus, setViewStatus] = useState(null); // sessions for the selected record's date
+  
+  // Date Details Modal State
+  const [showDateDetailsModal, setShowDateDetailsModal] = useState(false);
+  const [selectedDateDetails, setSelectedDateDetails] = useState(null);
+  const [dateDetailsLoading, setDateDetailsLoading] = useState(false);
+  
   // Month/Year selection for Monthly Calendar
   const init = new Date();
   const [selectedMonth, setSelectedMonth] = useState(init.getMonth()); // 0-11
   const [selectedYear, setSelectedYear] = useState(init.getFullYear());
-
   
+  // State for attendance summary data
+  const [attendanceTotals, setAttendanceTotals] = useState({
+    present: 0,
+    absent: 0,
+    late: 0,
+    totalWorkingDays: 0,
+    attendancePercentage: '0.00'
+  });
+  const [totalsLoading, setTotalsLoading] = useState(false);
+
+  // Function to fetch attendance totals for the selected month
+  const fetchAttendanceTotals = async () => {
+    if (!user?.employeeId) return;
+    
+    setTotalsLoading(true);
+    try {
+      // Calculate date range for the selected month
+      const firstDay = new Date(selectedYear, selectedMonth, 1);
+      const lastDay = new Date(selectedYear, selectedMonth + 1, 0);
+      const from = firstDay.toISOString().split('T')[0]; // YYYY-MM-DD
+      const to = lastDay.toISOString().split('T')[0]; // YYYY-MM-DD
+      
+      const response = await AttendanceAPI.getEmployeeSummary({
+        employeeId: user.employeeId,
+        from,
+        to
+      });
+      
+      if (response.data) {
+        setAttendanceTotals({
+          present: response.data.presentDays || 0,
+          absent: response.data.absentDays || 0,
+          late: response.data.lateDays || 0,
+          totalWorkingDays: response.data.totalWorkingDays || 0,
+          attendancePercentage: response.data.attendancePercentage || '0.00'
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching attendance totals:', error);
+      // Fallback to existing calculation if API fails
+      calculateTotalsFromExistingData();
+    } finally {
+      setTotalsLoading(false);
+    }
+  };
+
+  // Fallback function to calculate totals from existing myAttendance data
+  const calculateTotalsFromExistingData = () => {
+    const map = new Map((myAttendance || []).map(r => [r.date, r]));
+    const first = new Date(selectedYear, selectedMonth, 1);
+    const last = new Date(selectedYear, selectedMonth + 1, 0);
+    let present = 0, absent = 0, late = 0;
+    const toKey = (dt) => `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`;
+    
+    for (let d = new Date(first); d <= last; d.setDate(d.getDate() + 1)) {
+      // Skip weekends (assuming Monday-Friday work week)
+      if (d.getDay() === 0 || d.getDay() === 6) continue;
+      
+      const key = toKey(d);
+      const rec = map.get(key);
+      if (!rec) {
+        absent++;
+        continue;
+      }
+      const status = (rec.status || '').toLowerCase();
+      if (status === 'present') present++;
+      else if (status === 'late') late++;
+      else if (status === 'absent') absent++;
+    }
+    
+    const totalWorkingDays = present + absent + late;
+    const attendancePercentage = totalWorkingDays > 0 ? ((present + late) / totalWorkingDays * 100).toFixed(2) : '0.00';
+    
+    setAttendanceTotals({
+      present,
+      absent,
+      late,
+      totalWorkingDays,
+      attendancePercentage
+    });
+  };
+
+  // Effect to fetch totals when month/year changes
+  useEffect(() => {
+    if (user?.employeeId) {
+      fetchAttendanceTotals();
+    }
+  }, [selectedMonth, selectedYear, user?.employeeId]);
 
   const handleEditRecord = (recordData) => {
     // For now, local-only edit modal; backend update not implemented here
@@ -135,6 +240,26 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
   const handleDeleteRecord = (recordId) => {
     if (window.confirm('Are you sure you want to delete this attendance record?')) {
       // Local-only deletion placeholder; backend deletion not implemented
+    }
+  };
+
+  // Handle date click to show attendance details
+  const handleDateClick = async (date) => {
+    setDateDetailsLoading(true);
+    setShowDateDetailsModal(true);
+    setSelectedDateDetails(null);
+
+    try {
+      const response = await AttendanceAPI.getAttendanceForDate(date);
+      setSelectedDateDetails(response.data);
+    } catch (error) {
+      console.error('Error fetching attendance details:', error);
+      setSelectedDateDetails({
+        error: 'Failed to load attendance details',
+        date: date
+      });
+    } finally {
+      setDateDetailsLoading(false);
     }
   };
 
@@ -222,9 +347,15 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
   }, [selectedMonth, selectedYear]);
 
   useEffect(() => {
-    // Drive UI state from active session status
+    // Drive UI state from attendance status
     if (attendanceStatus) {
-      setIsCheckedIn(!!attendanceStatus.activeSession);
+      // Employee is considered "checked in" if:
+      // 1. They have an active session (ongoing check-in), OR
+      // 2. They have attendance for today (including HR/Admin added attendance) but no completed sessions yet
+      const hasActiveSession = !!attendanceStatus.activeSession;
+      const hasAttendanceButNoCompletedSessions = attendanceStatus.hasAttendanceToday && !attendanceStatus.hasCompletedSessions;
+      
+      setIsCheckedIn(hasActiveSession || hasAttendanceButNoCompletedSessions);
       setCheckInTime(attendanceStatus.sessionStartTime || null);
     }
   }, [attendanceStatus]);
@@ -553,6 +684,115 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
     setReportOpen(false);
   };
 
+  // Add Employee Attendance Handler Functions
+  const handleAddAttendanceFormChange = (field, value) => {
+    setAddAttendanceForm(prev => ({
+      ...prev,
+      [field]: value
+    }));
+    // Clear error when user starts typing
+    if (addAttendanceError) {
+      setAddAttendanceError('');
+    }
+  };
+
+  const validateAddAttendanceForm = () => {
+    const { employeeId, date, checkInTime } = addAttendanceForm;
+    
+    if (!employeeId) {
+      setAddAttendanceError('Please select an employee');
+      return false;
+    }
+    
+    if (!date) {
+      setAddAttendanceError('Please select a date');
+      return false;
+    }
+    
+    if (!checkInTime) {
+      setAddAttendanceError('Please enter check-in time');
+      return false;
+    }
+
+    // Validate date is not in the future
+    const selectedDate = new Date(date);
+    const today = new Date();
+    today.setHours(23, 59, 59, 999); // End of today
+    
+    if (selectedDate > today) {
+      setAddAttendanceError('Cannot add attendance for future dates');
+      return false;
+    }
+
+    // Validate check-out time is after check-in time if provided
+    if (addAttendanceForm.checkOutTime) {
+      const checkIn = new Date(`${date}T${checkInTime}`);
+      const checkOut = new Date(`${date}T${addAttendanceForm.checkOutTime}`);
+      
+      if (checkOut <= checkIn) {
+        setAddAttendanceError('Check-out time must be after check-in time');
+        return false;
+      }
+    }
+
+    return true;
+  };
+
+  const handleAddAttendanceSubmit = async () => {
+    if (!validateAddAttendanceForm()) {
+      return;
+    }
+
+    setIsAddingAttendance(true);
+    setAddAttendanceError('');
+
+    try {
+      const { employeeId, date, checkInTime, checkOutTime, description } = addAttendanceForm;
+      
+      // Format the data for API
+      const attendanceData = {
+        employeeId,
+        date,
+        checkIn: checkInTime,
+        checkOut: checkOutTime || null,
+        description: description || 'Added by HR/Admin',
+        status: checkOutTime ? 'present' : 'present' // Will be calculated by backend
+      };
+
+      // Call API to add attendance (we'll need to add this endpoint)
+      await AttendanceAPI.addEmployeeAttendance(attendanceData);
+
+      // Refresh attendance data
+      if (fetchAllAttendance) {
+        await fetchAllAttendance();
+      }
+      if (fetchMyAttendance) {
+        await fetchMyAttendance();
+      }
+
+      // Reset form and close modal
+      setAddAttendanceForm({
+        employeeId: '',
+        date: new Date().toISOString().split('T')[0],
+        checkInTime: '',
+        checkOutTime: '',
+        description: ''
+      });
+      setShowAddAttendanceModal(false);
+      
+      alert('Employee attendance added successfully!');
+      
+    } catch (error) {
+      console.error('Error adding employee attendance:', error);
+      setAddAttendanceError(
+        error.response?.data?.message || 
+        'Failed to add employee attendance. Please try again.'
+      );
+    } finally {
+      setIsAddingAttendance(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -562,6 +802,27 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
           <p className="text-gray-600 dark:text-gray-400">Track and manage employee attendance</p>
         </div>
         <div className="flex space-x-3">
+          {/* Add Employee Attendance Button - Only for HR and Admin */}
+          {(user?.role === 'admin' || user?.role === 'hr') && (
+            <Button 
+              variant="outline" 
+              className="flex items-center space-x-2 bg-green-50 hover:bg-green-100 text-green-700 border-green-200" 
+              onClick={() => {
+                setAddAttendanceForm({
+                  employeeId: '',
+                  date: new Date().toISOString().split('T')[0],
+                  checkInTime: '',
+                  checkOutTime: '',
+                  description: ''
+                });
+                setAddAttendanceError('');
+                setShowAddAttendanceModal(true);
+              }}
+            >
+              <Plus className="h-4 w-4" />
+              <span>Add Employee Attendance</span>
+            </Button>
+          )}
           <Button variant="outline" className="flex items-center space-x-2" onClick={handleExportAttendance}>
             <Download className="h-4 w-4" />
             <span>Export</span>
@@ -974,29 +1235,32 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
               {/* Totals and month/year picker aligned horizontally */}
               <div className="flex flex-wrap items-center gap-4">
                 {/* Totals */}
-                {(() => {
-                  const map = new Map((myAttendance || []).map(r => [r.date, r]));
-                  const first = new Date(selectedYear, selectedMonth, 1);
-                  const last = new Date(selectedYear, selectedMonth + 1, 0);
-                  let present = 0, absent = 0, late = 0;
-                  const toKey = (dt) => `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`;
-                  for (let d = new Date(first); d <= last; d.setDate(d.getDate() + 1)) {
-                    const key = toKey(d);
-                    const rec = map.get(key);
-                    if (!rec) continue;
-                    const status = (rec.status || '').toLowerCase();
-                    if (status === 'present') present++;
-                    else if (status === 'late') late++;
-                    else if (status === 'absent') absent++;
-                  }
-                  return (
-                    <div className="flex items-center gap-4 text-sm">
-                      <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full bg-green-500"></span><span>Present: {present}</span></div>
-                      <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full bg-red-500"></span><span>Absent: {absent}</span></div>
-                      <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full bg-yellow-500"></span><span>Late: {late}</span></div>
+                <div className="flex items-center gap-4 text-sm">
+                  {totalsLoading ? (
+                    <div className="flex items-center gap-2 text-gray-500">
+                      <div className="w-4 h-4 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin"></div>
+                      <span>Loading totals...</span>
                     </div>
-                  );
-                })()}
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <span className="w-3 h-3 rounded-full bg-green-500"></span>
+                        <span>Present: {attendanceTotals.present}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="w-3 h-3 rounded-full bg-red-500"></span>
+                        <span>Absent: {attendanceTotals.absent}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="w-3 h-3 rounded-full bg-yellow-500"></span>
+                        <span>Late: {attendanceTotals.late}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
+                        <span>Attendance: {attendanceTotals.attendancePercentage}%</span>
+                      </div>
+                    </>
+                  )}
+                </div>
                 {/* Picker */}
                 <div className="flex items-center gap-2">
                   {(() => {
@@ -1107,8 +1371,9 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
                       return (
                         <div
                           key={key}
-                          className={`p-2 rounded-lg text-center border dark:border-gray-800 ${isToday ? 'bg-gray-900 text-white dark:bg-gray-800' : 'hover:bg-gray-100 dark:hover:bg-gray-800'} ${rec ? 'cursor-pointer' : ''}`}
+                          className={`p-2 rounded-lg text-center border dark:border-gray-800 cursor-pointer transition-colors ${isToday ? 'bg-gray-900 text-white dark:bg-gray-800' : 'hover:bg-gray-100 dark:hover:bg-gray-800'}`}
                           title={title}
+                          onClick={() => handleDateClick(key)}
                         >
                           <div className="text-sm font-medium">{day}</div>
                           <div className="flex justify-center mt-1 h-2">
@@ -1180,10 +1445,40 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
                   <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Total Hours</label>
                   {(() => {
                     const isSelfToday = (user?.role === 'employee') && (selectedRecord.date === today);
-                    const secs = isSelfToday
-                      ? totalSecondsFromSessions()
-                      : totalSecondsFromSessionsGeneric(viewStatus?.sessions || []);
-                    return <p className="text-gray-900 dark:text-white font-bold text-lg">{formatSec(secs)}</p>;
+                    
+                    // If there are sessions, use session-based calculation
+                    const sessions = viewStatus?.sessions || [];
+                    if (sessions.length > 0) {
+                      const secs = isSelfToday
+                        ? totalSecondsFromSessions()
+                        : totalSecondsFromSessionsGeneric(sessions);
+                      return <p className="text-gray-900 dark:text-white font-bold text-lg">{formatSec(secs)}</p>;
+                    }
+                    
+                    // For manually added attendance (no sessions), calculate from checkIn/checkOut
+                    const attendance = viewStatus?.attendance || selectedRecord;
+                    if (attendance.checkIn && attendance.checkOut) {
+                      const checkInTime = attendance.checkIn;
+                      const checkOutTime = attendance.checkOut;
+                      
+                      // Calculate hours from time strings
+                      const parseTime = (timeStr) => {
+                        if (!timeStr || timeStr === '-') return null;
+                        const [hours, minutes, seconds = 0] = timeStr.split(':').map(Number);
+                        return hours * 3600 + minutes * 60 + (seconds || 0);
+                      };
+                      
+                      const startSec = parseTime(checkInTime);
+                      const endSec = parseTime(checkOutTime);
+                      
+                      if (startSec !== null && endSec !== null && endSec > startSec) {
+                        const totalSecs = endSec - startSec;
+                        return <p className="text-gray-900 dark:text-white font-bold text-lg">{formatSec(totalSecs)}</p>;
+                      }
+                    }
+                    
+                    // Fallback to 00:00:00 if no valid data
+                    return <p className="text-gray-900 dark:text-white font-bold text-lg">00:00:00</p>;
                   })()}
                 </div>
               </div>
@@ -1195,29 +1490,64 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
                   <div className="min-w-full md:min-w-[600px] space-y-2">
                     {(() => {
                       const isSelfToday = (user?.role === 'employee') && (selectedRecord.date === today);
-                      const list = isSelfToday ? todaySessions : (viewStatus?.sessions || []);
-                      return list.length ?
-                        list.map((s, i) => {
-                          const sSec = parseHMS(s.startTime);
-                          const eSec = s.endTime ? parseHMS(s.endTime) : null;
+                      const sessions = isSelfToday ? todaySessions : (viewStatus?.sessions || []);
+                      
+                      // If no sessions but we have checkIn/checkOut from manually added attendance, create synthetic session
+                      if (sessions.length === 0) {
+                        const attendance = viewStatus?.attendance || selectedRecord;
+                        if (attendance.checkIn && attendance.checkIn !== '-') {
+                          const syntheticSession = {
+                            id: 'synthetic-1',
+                            startTime: attendance.checkIn,
+                            endTime: attendance.checkOut && attendance.checkOut !== '-' ? attendance.checkOut : null,
+                            isSynthetic: true
+                          };
+                          
+                          const sSec = parseHMS(syntheticSession.startTime);
+                          const eSec = syntheticSession.endTime ? parseHMS(syntheticSession.endTime) : null;
                           const dur = (sSec !== null) ? (eSec !== null ? Math.max(0, eSec - sSec) : 0) : 0;
-                          const canEdit = (user?.role === 'admin' || user?.role === 'hr') && !isSelfToday; // admin/hr editing others
+                          
                           return (
-                            <SessionRow
-                              key={s.id || i}
-                              index={i}
-                              session={s}
-                              durationLabel={formatSec(dur)}
-                              canEdit={canEdit}
-                              onSave={async (updated) => {
-                                await AttendanceAPI.updateSession({ sessionId: s.id, startTime: updated.startTime, endTime: updated.endTime });
-                                await refreshViewStatus();
-                              }}
-                            />
+                            <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-md text-sm border border-blue-200 dark:border-blue-800">
+                              <div className="flex items-center justify-between">
+                                <span className="font-medium text-blue-800 dark:text-blue-300">Manual Entry</span>
+                                <span className="text-blue-700 dark:text-blue-300">
+                                  {syntheticSession.startTime} → {syntheticSession.endTime || 'No checkout'}
+                                </span>
+                                <span className="font-medium text-blue-800 dark:text-blue-300">{formatSec(dur)}</span>
+                              </div>
+                              <div className="text-xs text-blue-600 dark:text-blue-400 mt-1">
+                                This attendance was manually added by HR/Admin
+                              </div>
+                            </div>
                           );
-                        }) : (
-                        <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-md text-sm text-gray-500">No sessions</div>
-                      );
+                        }
+                        
+                        return (
+                          <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-md text-sm text-gray-500">No sessions</div>
+                        );
+                      }
+                      
+                      // Display actual sessions
+                      return sessions.map((s, i) => {
+                        const sSec = parseHMS(s.startTime);
+                        const eSec = s.endTime ? parseHMS(s.endTime) : null;
+                        const dur = (sSec !== null) ? (eSec !== null ? Math.max(0, eSec - sSec) : 0) : 0;
+                        const canEdit = (user?.role === 'admin' || user?.role === 'hr') && !isSelfToday; // admin/hr editing others
+                        return (
+                          <SessionRow
+                            key={s.id || i}
+                            index={i}
+                            session={s}
+                            durationLabel={formatSec(dur)}
+                            canEdit={canEdit}
+                            onSave={async (updated) => {
+                              await AttendanceAPI.updateSession({ sessionId: s.id, startTime: updated.startTime, endTime: updated.endTime });
+                              await refreshViewStatus();
+                            }}
+                          />
+                        );
+                      });
                     })()}
                   </div>
                 </div>
@@ -1366,6 +1696,293 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
             <div className="flex justify-end gap-3 mt-6">
               <Button variant="outline" onClick={() => setReportOpen(false)}>Cancel</Button>
               <Button onClick={handleGenerateReport}>Generate</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Employee Attendance Modal */}
+      {showAddAttendanceModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-900 rounded-lg w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              {/* Modal Header */}
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <h3 className="text-xl font-semibold text-gray-900 dark:text-white">Add Employee Attendance</h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Manually add attendance record for an employee</p>
+                </div>
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={() => setShowAddAttendanceModal(false)}
+                  disabled={isAddingAttendance}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+
+              {/* Error Message */}
+              {addAttendanceError && (
+                <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md">
+                  <p className="text-sm text-red-600">{addAttendanceError}</p>
+                </div>
+              )}
+
+              {/* Form */}
+              <div className="space-y-6">
+                {/* Employee Selection */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    <User className="h-4 w-4 inline mr-1" />
+                    Select Employee *
+                  </label>
+                  <select
+                    value={addAttendanceForm.employeeId}
+                    onChange={(e) => handleAddAttendanceFormChange('employeeId', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-white"
+                    disabled={isAddingAttendance}
+                  >
+                    <option value="">Choose an employee...</option>
+                    {(employees || [])
+                      .filter(emp => emp?.status === 'active')
+                      .map(employee => (
+                        <option key={employee.id} value={employee.employeeId}>
+                          {employee.name} ({employee.employeeId}) - {employee.email}
+                        </option>
+                      ))
+                    }
+                  </select>
+                </div>
+
+                {/* Date Picker */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    <Calendar className="h-4 w-4 inline mr-1" />
+                    Date *
+                  </label>
+                  <Input
+                    type="date"
+                    value={addAttendanceForm.date}
+                    onChange={(e) => handleAddAttendanceFormChange('date', e.target.value)}
+                    max={new Date().toISOString().split('T')[0]} // Prevent future dates
+                    disabled={isAddingAttendance}
+                    className="w-full"
+                  />
+                </div>
+
+                {/* Time Fields */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Check-in Time */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      <Clock className="h-4 w-4 inline mr-1" />
+                      Punch In Time *
+                    </label>
+                    <Input
+                      type="time"
+                      value={addAttendanceForm.checkInTime}
+                      onChange={(e) => handleAddAttendanceFormChange('checkInTime', e.target.value)}
+                      disabled={isAddingAttendance}
+                      className="w-full"
+                    />
+                  </div>
+
+                  {/* Check-out Time */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      <Timer className="h-4 w-4 inline mr-1" />
+                      Punch Out Time
+                    </label>
+                    <Input
+                      type="time"
+                      value={addAttendanceForm.checkOutTime}
+                      onChange={(e) => handleAddAttendanceFormChange('checkOutTime', e.target.value)}
+                      disabled={isAddingAttendance}
+                      className="w-full"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">Leave empty if employee hasn't checked out yet</p>
+                  </div>
+                </div>
+
+                {/* Description */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Description
+                  </label>
+                  <textarea
+                    value={addAttendanceForm.description}
+                    onChange={(e) => handleAddAttendanceFormChange('description', e.target.value)}
+                    placeholder="Optional notes about this attendance record..."
+                    rows={3}
+                    disabled={isAddingAttendance}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-white resize-none"
+                  />
+                </div>
+
+                {/* Info Box */}
+                <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md p-4">
+                  <div className="flex items-start space-x-2">
+                    <div className="flex-shrink-0">
+                      <div className="w-5 h-5 bg-blue-500 rounded-full flex items-center justify-center">
+                        <span className="text-white text-xs font-bold">i</span>
+                      </div>
+                    </div>
+                    <div className="text-sm text-blue-700 dark:text-blue-300">
+                      <p className="font-medium mb-1">Important Notes:</p>
+                      <ul className="list-disc list-inside space-y-1 text-xs">
+                        <li>This will create an attendance record that the employee can see</li>
+                        <li>The employee will be able to view this attendance in their calendar</li>
+                        <li>Punch out time is optional - leave empty for ongoing attendance</li>
+                        <li>Cannot add attendance for future dates</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Modal Footer */}
+              <div className="flex justify-end space-x-3 mt-8 pt-6 border-t border-gray-200 dark:border-gray-700">
+                <Button 
+                  variant="outline" 
+                  onClick={() => setShowAddAttendanceModal(false)}
+                  disabled={isAddingAttendance}
+                >
+                  Cancel
+                </Button>
+                <Button 
+                  onClick={handleAddAttendanceSubmit}
+                  disabled={isAddingAttendance}
+                  className="flex items-center space-x-2"
+                >
+                  {isAddingAttendance ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                      <span>Adding...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="h-4 w-4" />
+                      <span>Add Attendance</span>
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Date Details Modal */}
+      {showDateDetailsModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-900 rounded-lg shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-6 border-b dark:border-gray-700">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                Attendance Details
+              </h3>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowDateDetailsModal(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-6">
+              {dateDetailsLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <div className="w-8 h-8 border-4 border-gray-300 border-t-blue-500 rounded-full animate-spin"></div>
+                  <span className="ml-3 text-gray-600 dark:text-gray-400">Loading attendance details...</span>
+                </div>
+              ) : selectedDateDetails?.error ? (
+                <div className="text-center py-8">
+                  <div className="text-red-500 mb-2">
+                    <XCircle className="h-12 w-12 mx-auto" />
+                  </div>
+                  <p className="text-gray-600 dark:text-gray-400">{selectedDateDetails.error}</p>
+                </div>
+              ) : selectedDateDetails?.status === 'present' ? (
+                <div className="space-y-4">
+                  <div className="text-center mb-4">
+                    <div className="text-green-500 mb-2">
+                      <CheckCircle className="h-12 w-12 mx-auto" />
+                    </div>
+                    <h4 className="text-lg font-semibold text-gray-900 dark:text-white">Present</h4>
+                    <p className="text-gray-600 dark:text-gray-400">{selectedDateDetails.data.date}</p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-lg">
+                      <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 mb-1">
+                        <Clock className="h-4 w-4" />
+                        Punch In
+                      </div>
+                      <div className="text-lg font-semibold text-gray-900 dark:text-white">
+                        {selectedDateDetails.data.checkIn || 'N/A'}
+                      </div>
+                    </div>
+
+                    <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-lg">
+                      <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 mb-1">
+                        <Timer className="h-4 w-4" />
+                        Punch Out
+                      </div>
+                      <div className="text-lg font-semibold text-gray-900 dark:text-white">
+                        {selectedDateDetails.data.checkOut || 'Not checked out'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-lg">
+                    <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 mb-1">
+                      <Clock className="h-4 w-4" />
+                      Hours Worked
+                    </div>
+                    <div className="text-lg font-semibold text-gray-900 dark:text-white">
+                      {selectedDateDetails.data.hoursWorked ? `${selectedDateDetails.data.hoursWorked} hours` : 'N/A'}
+                    </div>
+                  </div>
+
+                  <div className="bg-gray-50 dark:bg-gray-800 p-3 rounded-lg">
+                    <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 mb-1">
+                      Status
+                    </div>
+                    <div className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                      selectedDateDetails.data.status === 'present' ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' :
+                      selectedDateDetails.data.status === 'late' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200' :
+                      'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200'
+                    }`}>
+                      {selectedDateDetails.data.status?.charAt(0).toUpperCase() + selectedDateDetails.data.status?.slice(1) || 'N/A'}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-8">
+                  <div className="text-red-500 mb-2">
+                    <XCircle className="h-12 w-12 mx-auto" />
+                  </div>
+                  <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Absent</h4>
+                  <p className="text-gray-600 dark:text-gray-400">{selectedDateDetails?.data?.date}</p>
+                  <p className="text-gray-500 dark:text-gray-500 mt-2">
+                    {selectedDateDetails?.data?.message || 'On Leave / Absent'}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex justify-end p-6 border-t dark:border-gray-700">
+              <Button
+                variant="outline"
+                onClick={() => setShowDateDetailsModal(false)}
+              >
+                Close
+              </Button>
             </div>
           </div>
         </div>
