@@ -334,12 +334,11 @@ const LeaveManagement = () => {
     }
   };
 
-  // When navigating to Mentions tab, fetch once and start polling; cleanup on leave
+  // When navigating to Mentions tab, fetch once (standard behavior)
   useEffect(() => {
     if (selectedTab !== 'mentions') return;
     fetchMentions();
-    const interval = setInterval(fetchMentions, 10000); // 10s polling
-    return () => clearInterval(interval);
+    // No polling interval - just fetch once when tab is clicked
   }, [selectedTab]);
 
   // Prevent HR from accessing Requests tab
@@ -1054,7 +1053,7 @@ const LeaveManagement = () => {
     const months = getMonthsInRange(ledgerRange.from, ledgerRange.to);
     const now = new Date();
     const currentYm = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
-    const monthlyCredit = (
+    const defaultMonthlyCredit = (
       Number(monthlyCreditAnnual) > 0
         ? Number(monthlyCreditAnnual)
         : (Number(monthlyCreditTotal) > 0 ? Number(monthlyCreditTotal) : estimateMonthlyCredit())
@@ -1075,6 +1074,12 @@ const LeaveManagement = () => {
       
       // Use backend data if available, otherwise fall back to local calculation
       const totalExtraCredit = extraFromBackend || (extraFromLocal + compensatoryFromLocal);
+      
+      // IMPORTANT: Only apply monthly credit if backend returned this month
+      // This respects the employee joining date logic from backend
+      const hasBackendData = Object.keys(backendLedger).length > 0;
+      const monthlyCredit = hasBackendData && !backendLedger[ym] ? 0 : defaultMonthlyCredit;
+      
       const credit = monthlyCredit + totalExtraCredit;
       const totalAvailable = opening + credit;
       
