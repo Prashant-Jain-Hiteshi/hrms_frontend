@@ -1085,53 +1085,23 @@ const DataProvider = ({ children }) => {
     // Approve leave request
     approveLeave: async (leaveId, comments = '') => {
       try {
-        // Find the request locally
-        const req = leaveRequests.find(l => String(l?.id) === String(leaveId)) || {};
-        const totalDays = _computeRequestDays(req);
-        const requestedType = _getRequestedTypeLabel(req);
-        const annualType = _pickAnnualTypeName();
+        console.log('🔍 DEBUG - Starting approveLeave for leaveId:', leaveId);
+        
+        // SIMPLIFIED VERSION - Just send basic approval without complex allocation logic
+        const payload = { status: 'approved', comments };
+        console.log('🔍 DEBUG - Simplified API payload:', payload);
 
-        // Fetch current balance to drive allocation
-        const balance = await fetchLeaveBalance();
-        const byType = _getBalanceByType(balance);
-
-        // Construct allocation: requested type -> annual -> LWP
-        let remaining = Number(totalDays) || 0;
-        const allocation = [];
-
-        if (remaining > 0 && requestedType) {
-          const avail = Number(byType[requestedType] ?? byType[requestedType?.toString?.()] ?? 0);
-          const use = Math.max(0, Math.min(remaining, isFinite(avail) ? avail : 0));
-          if (use > 0) {
-            allocation.push({ type: requestedType, days: Number(use.toFixed(2)) });
-            remaining = Number((remaining - use).toFixed(2));
-          }
-        }
-
-        if (remaining > 0 && annualType && (!requestedType || annualType !== requestedType)) {
-          const avail = Number(byType[annualType] ?? byType[annualType?.toString?.()] ?? 0);
-          const use = Math.max(0, Math.min(remaining, isFinite(avail) ? avail : 0));
-          if (use > 0) {
-            allocation.push({ type: annualType, days: Number(use.toFixed(2)) });
-            remaining = Number((remaining - use).toFixed(2));
-          }
-        }
-
-        if (remaining > 0) {
-          // Anything left becomes LWP
-          allocation.push({ type: 'LWP', days: Number(remaining.toFixed(2)) });
-          remaining = 0;
-        }
-
-        const payload = { status: 'approved', comments, allocation };
-
+        console.log('🔍 DEBUG - Calling LeaveAPI.updateStatus...');
         const { data } = await LeaveAPI.updateStatus(leaveId, payload);
+        console.log('🔍 DEBUG - API response:', data);
+        
         setLeaveRequests(prev => prev.map(leave => 
-          leave.id === leaveId ? { ...leave, ...data, allocation } : leave
+          leave.id === leaveId ? { ...leave, ...data } : leave
         ));
         return data;
       } catch (error) {
-        console.error('Failed to approve leave request:', error);
+        console.error('🚨 ERROR in approveLeave:', error);
+        console.error('🚨 ERROR details:', error.response?.data || error.message);
         throw error; // Re-throw to let component handle the error
       }
     },
