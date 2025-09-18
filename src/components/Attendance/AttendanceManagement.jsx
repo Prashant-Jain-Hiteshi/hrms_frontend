@@ -1,11 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
-import { Users, Clock, Timer, Search, Filter, CheckCircle, XCircle, Eye, Download, Calendar, Plus, User, Save, X } from 'lucide-react';
+import { Users, Clock, Timer, Search, Filter, CheckCircle, XCircle, Eye, Download, Calendar, Plus, User, Save, X, Play, Pause } from 'lucide-react';
  
 import { useAuth } from '../../contexts/AuthContext';
-import { useEffect } from 'react';
 import { useData } from '../../contexts/DataContext';
 import { AttendanceAPI } from '../../lib/api';
 import {
@@ -66,6 +65,16 @@ const AttendanceManagement = () => {
   const [showDateDetailsModal, setShowDateDetailsModal] = useState(false);
   const [selectedDateDetails, setSelectedDateDetails] = useState(null);
   const [dateDetailsLoading, setDateDetailsLoading] = useState(false);
+
+  // Work Duration Timer State
+  const [workDuration, setWorkDuration] = useState('00:00:00');
+  const [totalWorkedTime, setTotalWorkedTime] = useState('00:00:00');
+  const [timerStartTime, setTimerStartTime] = useState(null);
+  const [isTimerRunning, setIsTimerRunning] = useState(false);
+  const timerIntervalRef = useRef(null);
+
+  // Derived state from attendance data
+  const activeSession = attendanceStatus?.activeSession;
   
   // Month/Year selection for Monthly Calendar
   const init = new Date();
@@ -115,6 +124,66 @@ const AttendanceManagement = () => {
       calculateTotalsFromExistingData();
     } finally {
       setTotalsLoading(false);
+    }
+  };
+
+  // Timer now uses the SAME logic as the table (totalSecondsFromSessions + formatSec)
+
+  const startTimer = (checkInTime) => {
+    try {
+      const startTime = checkInTime || new Date().toISOString();
+      console.log('🔍 DEBUG - Starting timer with:', { checkInTime, startTime });
+      
+      setTimerStartTime(startTime);
+      setIsTimerRunning(true);
+      
+      // Clear any existing timer
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current);
+      }
+      
+      // Start new timer using the SAME logic as the table
+      timerIntervalRef.current = setInterval(() => {
+        try {
+          // Use the exact same logic as the table: formatSec(totalSecondsFromSessions())
+          const currentSeconds = totalSecondsFromSessions();
+          const formatted = formatSec(currentSeconds);
+          console.log('🔍 DEBUG - Timer update (using table logic):', { currentSeconds, formatted });
+          setWorkDuration(formatted);
+        } catch (error) {
+          console.error('Error updating timer:', error);
+        }
+      }, 1000);
+    } catch (error) {
+      console.error('Error starting timer:', error);
+    }
+  };
+
+  const stopTimer = () => {
+    setIsTimerRunning(false);
+    if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = null;
+    }
+    
+    // Use the SAME logic as the table for final worked time
+    const finalSeconds = totalSecondsFromSessions();
+    const completedTime = formatSec(finalSeconds);
+    setTotalWorkedTime(completedTime);
+    
+    console.log('🔍 DEBUG - Timer stopped (using table logic):', { 
+      finalSeconds, 
+      completedTime 
+    });
+  };
+
+  const resumeTimer = (checkInTime) => {
+    if (checkInTime && !isTimerRunning) {
+      try {
+        startTimer(checkInTime);
+      } catch (error) {
+        console.error('Error resuming timer:', error);
+      }
     }
   };
 
@@ -357,20 +426,81 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
       
       setIsCheckedIn(hasActiveSession || hasAttendanceButNoCompletedSessions);
       setCheckInTime(attendanceStatus.sessionStartTime || null);
+
+      // Resume timer if there's an active session and timer is not already running
+      if (hasActiveSession && attendanceStatus.sessionStartTime && !isTimerRunning) {
+        const startTimestamp = attendanceStatus.sessionStartTimestamp || attendanceStatus.sessionStartTime;
+        console.log('🔍 DEBUG - Attempting to resume timer:', { 
+          hasActiveSession, 
+          sessionStartTime: attendanceStatus.sessionStartTime,
+          startTimestamp,
+          isTimerRunning 
+        });
+        if (startTimestamp) {
+          resumeTimer(startTimestamp);
+        }
+      } else if (!hasActiveSession && isTimerRunning) {
+        // Stop timer if no active session
+        console.log('🔍 DEBUG - Stopping timer (no active session)');
+        stopTimer();
+      } else if (!hasActiveSession && !isTimerRunning) {
+        // Use the SAME logic as the table for completed time
+        const currentSeconds = totalSecondsFromSessions();
+        const completedTime = formatSec(currentSeconds);
+        setTotalWorkedTime(completedTime);
+        setWorkDuration('00:00:00'); // Reset work duration
+        setTimerStartTime(null);
+        
+        console.log('🔍 DEBUG - Setting completed hours (table logic):', { 
+          currentSeconds, 
+          completedTime 
+        });
+      }
     }
   }, [attendanceStatus]);
+
+  // Sync timer with table logic when attendance changes
+  useEffect(() => {
+    if (!isTimerRunning && !activeSession) {
+      // Use the SAME logic as the table for completed time
+      const currentSeconds = totalSecondsFromSessions();
+      const completedTime = formatSec(currentSeconds);
+      setTotalWorkedTime(completedTime);
+      
+      console.log('🔍 DEBUG - Syncing with table logic:', { 
+        currentSeconds, 
+        completedTime 
+      });
+    }
+  }, [myAttendance, isTimerRunning, activeSession, attendanceStatus]);
+
+  // Cleanup timer on component unmount
+  useEffect(() => {
+    return () => {
+      if (timerIntervalRef.current) {
+        clearInterval(timerIntervalRef.current);
+      }
+    };
+  }, []);
 
   const handleCheckIn = async () => {
     const data = await attendanceCheckIn({});
     await fetchAttendanceStatus();
     setIsCheckedIn(true);
-    setCheckInTime(attendanceStatus?.sessionStartTime || data?.checkIn || new Date().toLocaleTimeString());
+    const checkInTimeValue = attendanceStatus?.sessionStartTime || data?.checkIn || new Date().toLocaleTimeString();
+    setCheckInTime(checkInTimeValue);
+    
+    // Start the work duration timer
+    startTimer(data?.checkInTimestamp || new Date().toISOString());
   };
 
   const handleCheckOut = async () => {
     await attendanceCheckOut({});
     await fetchAttendanceStatus();
     setIsCheckedIn(false);
+    
+    // Stop the work duration timer
+    stopTimer();
   };
 
   const openConfirm = (type) => {
@@ -442,11 +572,24 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
   const [entriesPerPage, setEntriesPerPage] = useState(10);
   const [adminStatus, setAdminStatus] = useState('all'); // 'all' | 'present' | 'late' | 'absent'
 
-  // Employee filters/state
+  // Employee filters/state (for Today's Attendance table)
   const [empType, setEmpType] = useState('daily'); // 'daily' | 'monthly'
   const [empPicker, setEmpPicker] = useState(today); // daily date (YYYY-MM-DD) or month base (YYYY-MM)
   const [empStatus, setEmpStatus] = useState('all'); // 'all' | 'present' | 'late' | 'absent'
   const [empEntriesPerPage, setEmpEntriesPerPage] = useState(10);
+
+  // Separate filters for Monthly Calendar
+  const [calendarType, setCalendarType] = useState('monthly'); // 'daily' | 'monthly'
+  const [calendarPicker, setCalendarPicker] = useState(() => new Date().toISOString().slice(0, 7)); // YYYY-MM for month
+  const [calendarStatus, setCalendarStatus] = useState('all'); // 'all' | 'present' | 'late' | 'absent'
+
+  // Separate state variables for Today's Attendance table data
+  const [todayTableData, setTodayTableData] = useState([]);
+  const [todayTableLoading, setTodayTableLoading] = useState(false);
+
+  // Separate state variables for Monthly Calendar data
+  const [calendarData, setCalendarData] = useState([]);
+  const [calendarLoading, setCalendarLoading] = useState(false);
 
   const adminBackendDate = () => {
     if (adminType === 'daily') return adminPicker; // yyyy-mm-dd
@@ -460,28 +603,130 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
     return new Date().toISOString().slice(0, 10);
   };
 
+  // Dedicated API function for Employee Today's Attendance table ONLY
+  const fetchEmployeeTableData = async () => {
+    // Only for employees - admin/HR don't have this separate table UI
+    if (user?.role !== 'employee') {
+      return;
+    }
+
+    setTodayTableLoading(true);
+    try {
+      console.log('🔍 DEBUG - Fetching Employee Today\'s Attendance table data with filters:', {
+        empType,
+        empPicker,
+        empStatus
+      });
+
+      let params = {};
+      
+      if (empType === 'daily') {
+        // For daily, use the same format as calendar: from and to dates
+        params = { from: empPicker, to: empPicker };
+      } else {
+        // For monthly, calculate from and to dates like the calendar does
+        const monthKey = /^\d{4}-\d{2}$/.test(empPicker) ? empPicker : String(empPicker || today).slice(0, 7);
+        const [year, month] = monthKey.split('-');
+        const first = new Date(parseInt(year), parseInt(month) - 1, 1);
+        const last = new Date(parseInt(year), parseInt(month), 0);
+        const from = first.toISOString().slice(0, 10);
+        const to = last.toISOString().slice(0, 10);
+        params = { from, to };
+      }
+      
+      console.log('🔍 DEBUG - API params for employee table:', params);
+      
+      // Use the same API call format as the calendar
+      const response = await fetchMyAttendance(params);
+      setTodayTableData(response || []);
+      console.log('🔍 DEBUG - Employee table data updated:', response?.length || 0, 'records');
+      
+    } catch (error) {
+      console.error('Error fetching employee table data:', error);
+      setTodayTableData([]);
+    } finally {
+      setTodayTableLoading(false);
+    }
+  };
+
+  // Keep the old function for backward compatibility (if needed elsewhere)
   const fetchAdminList = async () => {
+    // Admin/HR use the original shared data approach
     const dateParam = adminBackendDate();
     const params = { type: adminType, date: dateParam };
     if (adminStatus && adminStatus !== 'all') {
-      // Absent filter is only supported for a single day (daily)
       if (adminStatus === 'absent' && adminType !== 'daily') {
-        return; // guarded by UI; no fetch until mode aligns
+        return;
       }
       params.status = adminStatus;
     }
     await fetchAllAttendance(params);
   };
 
-  // Re-fetch when admin filters change
+  // Separate fetch function for Monthly Calendar
+  const fetchCalendarData = async () => {
+    setCalendarLoading(true);
+    try {
+      if (user?.role === 'employee') {
+        // For employees, fetch their own attendance data for the calendar
+        const first = new Date(selectedYear, selectedMonth, 1);
+        const last = new Date(selectedYear, selectedMonth + 1, 0);
+        const from = first.toISOString().slice(0, 10);
+        const to = last.toISOString().slice(0, 10);
+        
+        // Call API directly and store in separate calendar state
+        const response = await AttendanceAPI.getMyAttendance({ from, to });
+        setCalendarData(response || []);
+        console.log('🔍 DEBUG - Calendar data updated:', response?.length || 0, 'records');
+      } else {
+        // For admin/HR, fetch all attendance data for the calendar
+        const calendarDate = calendarType === 'monthly' ? `${calendarPicker}-01` : calendarPicker;
+        const params = { type: calendarType, date: calendarDate };
+        if (calendarStatus && calendarStatus !== 'all') {
+          if (calendarStatus === 'absent' && calendarType !== 'daily') {
+            setCalendarLoading(false);
+            return; // guarded by UI; no fetch until mode aligns
+          }
+          params.status = calendarStatus;
+        }
+        
+        // Call API directly and store in separate calendar state
+        const response = await AttendanceAPI.getAllAttendance(params);
+        setCalendarData(response || []);
+        console.log('🔍 DEBUG - Calendar data updated:', response?.length || 0, 'records');
+      }
+    } catch (error) {
+      console.error('Error fetching calendar data:', error);
+      setCalendarData([]);
+    } finally {
+      setCalendarLoading(false);
+    }
+  };
+
+  // Separate useEffect for Employee Today's Attendance table ONLY
+  useEffect(() => {
+    if (user?.role === 'employee') {
+      fetchEmployeeTableData();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [empType, empPicker, empStatus, user]);
+
+  // Keep original admin useEffect for admin/HR
   useEffect(() => {
     if (user?.role === 'admin' || user?.role === 'hr') {
       fetchAdminList();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminType, adminPicker, adminStatus]);
+
+  // Separate useEffect for calendar data fetching
+  useEffect(() => {
+    if (user) {
+      fetchCalendarData();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [calendarType, calendarPicker, calendarStatus, selectedMonth, selectedYear]);
   const selfToday = (myAttendance || []).find(r => r.date === today);
-  const activeSession = !!attendanceStatus?.activeSession;
   const toHoursDisplay = (hoursWorked, checkIn, checkOut) => {
     const pad2 = (n) => String(n).padStart(2, '0');
     const fmt = (totalSeconds) => {
@@ -530,7 +775,7 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
   };
   const todaySessions = Array.isArray(attendanceStatus?.sessions) ? attendanceStatus.sessions : [];
   const lastClosedSession = [...todaySessions].reverse().find((s) => !!s.endTime);
-  const lastCheckoutTime = lastClosedSession?.endTime || '-';
+  const lastCheckoutTime = lastClosedSession?.endTime || attendanceStatus?.lastCheckoutTime || '-';
   const totalSecondsFromSessions = () => {
     let total = 0;
     const now = new Date();
@@ -582,19 +827,9 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
   const isEmployee = user?.role === 'employee';
   // Build employee list with employee filters applied
   const employeeRecords = (() => {
-    const monthKey = /^\d{4}-\d{2}$/.test(empPicker) ? empPicker : String(empPicker || today).slice(0, 7);
-    const source = (myAttendance || [])
+    // Use the dedicated employee table data instead of shared myAttendance
+    const source = (todayTableData || [])
       .filter(r => r?.date && String(r.date) <= today)
-      .filter(r => {
-        if (empType === 'daily') return String(r.date) === String(empPicker);
-        // monthly
-        return String(r.date).startsWith(monthKey);
-      })
-      .filter(r => {
-        if (empStatus === 'all') return true;
-        const st = (r.status || (r.checkIn ? 'present' : 'absent')).toLowerCase();
-        return st === empStatus;
-      })
       .sort((a, b) => String(b.date).localeCompare(String(a.date)))
       .slice(0, empEntriesPerPage);
 
@@ -626,7 +861,7 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
   // Summary metrics: Present Today, Absent Today, Late Today (role-aware)
   const activeEmployees = (employees || []).filter(e => (e?.status || 'active') === 'active');
   const todayMy = (myAttendance || []).find(r => r.date === today);
-  const adminTodayPresent = (allAttendance || []).filter(r => r?.date === today && r?.checkIn);
+  const adminTodayPresent = (todayTableData || []).filter(r => r?.date === today && r?.checkIn);
   // Prefer backend weekly aggregated data for Admin/HR to keep charts and KPIs consistent
   const weeklyToday = (user?.role === 'admin' || user?.role === 'hr')
     ? (() => {
@@ -644,7 +879,7 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
     : (weeklyToday ? weeklyToday.absent : Math.max(0, activeEmployees.length - presentTodayCount));
   const lateTodayCount = (user?.role === 'employee')
     ? (todayMy?.status === 'late' ? 1 : 0)
-    : (weeklyToday ? weeklyToday.late : (allAttendance || []).filter(r => r?.date === today && r?.status === 'late').length);
+    : (weeklyToday ? weeklyToday.late : (todayTableData || []).filter(r => r?.date === today && r?.status === 'late').length);
 
   // Weekly charts now use backend-provided data in weeklyData
 
@@ -897,6 +1132,61 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
                     <Clock className="h-4 w-4 mr-2" />
                     Check Out
                   </Button>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Work Duration Timer - Only show for employees */}
+      {user?.role === 'employee' && (
+        <Card className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border-blue-200 dark:border-blue-800">
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-4">
+                <div className={`rounded-full p-3 ${isTimerRunning ? 'bg-green-100 dark:bg-green-900/20' : 'bg-gray-100 dark:bg-gray-800'}`}>
+                  {isTimerRunning ? (
+                    <Play className="h-6 w-6 text-green-600 dark:text-green-400" />
+                  ) : (
+                    <Pause className="h-6 w-6 text-gray-500 dark:text-gray-400" />
+                  )}
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                    {isTimerRunning ? 'Work Duration' : 'Total Worked'}
+                  </p>
+                  <div className={`text-3xl font-mono font-bold ${isTimerRunning ? 'text-green-600 dark:text-green-400' : 'text-blue-600 dark:text-blue-400'}`}>
+                    {isTimerRunning ? (workDuration || '00:00:00') : (totalWorkedTime || '00:00:00')}
+                  </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    {isTimerRunning ? '(running)' : isCheckedIn ? '(paused)' : '(completed)'}
+                  </p>
+                </div>
+              </div>
+              <div className="text-right">
+                <div className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${
+                  isTimerRunning 
+                    ? 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300' 
+                    : isCheckedIn 
+                    ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300'
+                    : 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300'
+                }`}>
+                  <div className={`w-2 h-2 rounded-full mr-2 ${
+                    isTimerRunning ? 'bg-green-500 animate-pulse' : isCheckedIn ? 'bg-yellow-500' : 'bg-gray-500'
+                  }`}></div>
+                  {isTimerRunning ? 'Active' : isCheckedIn ? 'Paused' : 'Stopped'}
+                </div>
+                {timerStartTime && (
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    Started: {(() => {
+                      try {
+                        return new Date(timerStartTime).toLocaleTimeString();
+                      } catch (error) {
+                        return 'Invalid time';
+                      }
+                    })()}
+                  </p>
                 )}
               </div>
             </div>
