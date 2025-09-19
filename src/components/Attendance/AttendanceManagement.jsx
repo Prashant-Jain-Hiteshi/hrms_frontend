@@ -78,8 +78,9 @@ const AttendanceManagement = () => {
   
   // Month/Year selection for Monthly Calendar
   const init = new Date();
-  const [selectedMonth, setSelectedMonth] = useState(init.getMonth()); // 0-11
+  const [selectedMonth, setSelectedMonth] = useState(init.getMonth()); // 0-11 (September = 8)
   const [selectedYear, setSelectedYear] = useState(init.getFullYear());
+  
   
   // State for attendance summary data
   const [attendanceTotals, setAttendanceTotals] = useState({
@@ -132,7 +133,6 @@ const AttendanceManagement = () => {
   const startTimer = (checkInTime) => {
     try {
       const startTime = checkInTime || new Date().toISOString();
-      console.log('🔍 DEBUG - Starting timer with:', { checkInTime, startTime });
       
       setTimerStartTime(startTime);
       setIsTimerRunning(true);
@@ -148,7 +148,6 @@ const AttendanceManagement = () => {
           // Use the exact same logic as the table: formatSec(totalSecondsFromSessions())
           const currentSeconds = totalSecondsFromSessions();
           const formatted = formatSec(currentSeconds);
-          console.log('🔍 DEBUG - Timer update (using table logic):', { currentSeconds, formatted });
           setWorkDuration(formatted);
         } catch (error) {
           console.error('Error updating timer:', error);
@@ -171,10 +170,7 @@ const AttendanceManagement = () => {
     const completedTime = formatSec(finalSeconds);
     setTotalWorkedTime(completedTime);
     
-    console.log('🔍 DEBUG - Timer stopped (using table logic):', { 
-      finalSeconds, 
-      completedTime 
-    });
+  
   };
 
   const resumeTimer = (checkInTime) => {
@@ -187,9 +183,10 @@ const AttendanceManagement = () => {
     }
   };
 
-  // Fallback function to calculate totals from existing myAttendance data
-  const calculateTotalsFromExistingData = () => {
-    const map = new Map((myAttendance || []).map(r => [r.date, r]));
+  // Calculate totals directly from calendar API data
+  const calculateTotalsFromCalendarData = (apiData) => {
+    const pad2 = (n) => String(n).padStart(2, '0');
+    const map = new Map((apiData || []).map(r => [r.date, r]));
     const first = new Date(selectedYear, selectedMonth, 1);
     const last = new Date(selectedYear, selectedMonth + 1, 0);
     let present = 0, absent = 0, late = 0;
@@ -221,6 +218,11 @@ const AttendanceManagement = () => {
       totalWorkingDays,
       attendancePercentage
     });
+  };
+
+  // Fallback function to calculate totals from existing calendar data
+  const calculateTotalsFromExistingData = () => {
+    calculateTotalsFromCalendarData(calendarData);
   };
 
   // Effect to fetch totals when month/year changes
@@ -430,18 +432,12 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
       // Resume timer if there's an active session and timer is not already running
       if (hasActiveSession && attendanceStatus.sessionStartTime && !isTimerRunning) {
         const startTimestamp = attendanceStatus.sessionStartTimestamp || attendanceStatus.sessionStartTime;
-        console.log('🔍 DEBUG - Attempting to resume timer:', { 
-          hasActiveSession, 
-          sessionStartTime: attendanceStatus.sessionStartTime,
-          startTimestamp,
-          isTimerRunning 
-        });
+      
         if (startTimestamp) {
           resumeTimer(startTimestamp);
         }
       } else if (!hasActiveSession && isTimerRunning) {
         // Stop timer if no active session
-        console.log('🔍 DEBUG - Stopping timer (no active session)');
         stopTimer();
       } else if (!hasActiveSession && !isTimerRunning) {
         // Use the SAME logic as the table for completed time
@@ -451,10 +447,7 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
         setWorkDuration('00:00:00'); // Reset work duration
         setTimerStartTime(null);
         
-        console.log('🔍 DEBUG - Setting completed hours (table logic):', { 
-          currentSeconds, 
-          completedTime 
-        });
+       
       }
     }
   }, [attendanceStatus]);
@@ -467,10 +460,6 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
       const completedTime = formatSec(currentSeconds);
       setTotalWorkedTime(completedTime);
       
-      console.log('🔍 DEBUG - Syncing with table logic:', { 
-        currentSeconds, 
-        completedTime 
-      });
     }
   }, [myAttendance, isTimerRunning, activeSession, attendanceStatus]);
 
@@ -612,11 +601,6 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
 
     setTodayTableLoading(true);
     try {
-      console.log('🔍 DEBUG - Fetching Employee Today\'s Attendance table data with filters:', {
-        empType,
-        empPicker,
-        empStatus
-      });
 
       let params = {};
       
@@ -634,12 +618,10 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
         params = { from, to };
       }
       
-      console.log('🔍 DEBUG - API params for employee table:', params);
       
       // Use the same API call format as the calendar
       const response = await fetchMyAttendance(params);
       setTodayTableData(response || []);
-      console.log('🔍 DEBUG - Employee table data updated:', response?.length || 0, 'records');
       
     } catch (error) {
       console.error('Error fetching employee table data:', error);
@@ -677,7 +659,11 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
         // Call API directly and store in separate calendar state
         const response = await AttendanceAPI.getMyAttendance({ from, to });
         setCalendarData(response || []);
-        console.log('🔍 DEBUG - Calendar data updated:', response?.length || 0, 'records');
+        
+        // Calculate totals from the calendar data
+        setTimeout(() => {
+          calculateTotalsFromCalendarData(response || []);
+        }, 100);
       } else {
         // For admin/HR, fetch all attendance data for the calendar
         const calendarDate = calendarType === 'monthly' ? `${calendarPicker}-01` : calendarPicker;
@@ -693,7 +679,9 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
         // Call API directly and store in separate calendar state
         const response = await AttendanceAPI.getAllAttendance(params);
         setCalendarData(response || []);
-        console.log('🔍 DEBUG - Calendar data updated:', response?.length || 0, 'records');
+        setTimeout(() => {
+          calculateTotalsFromCalendarData(response || []);
+        }, 100);
       }
     } catch (error) {
       console.error('Error fetching calendar data:', error);
@@ -725,7 +713,7 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
       fetchCalendarData();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [calendarType, calendarPicker, calendarStatus, selectedMonth, selectedYear]);
+  }, [calendarType, calendarPicker, calendarStatus, selectedMonth, selectedYear, user]);
   const selfToday = (myAttendance || []).find(r => r.date === today);
   const toHoursDisplay = (hoursWorked, checkIn, checkOut) => {
     const pad2 = (n) => String(n).padStart(2, '0');
@@ -1058,39 +1046,43 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
               <span>Add Employee Attendance</span>
             </Button>
           )}
-          <Button variant="outline" className="flex items-center space-x-2" onClick={handleExportAttendance}>
-            <Download className="h-4 w-4" />
-            <span>Export</span>
-          </Button>
-          <Button
-            variant="default"
-            className="flex items-center space-x-2"
-            onClick={() => {
-              // Prefill defaults based on current Admin view
-              try {
-                if (user?.role === 'admin' || user?.role === 'hr') {
-                  if (adminType === 'daily') {
-                    setReportType('daily');
-                    const d = (adminPicker && adminPicker.length >= 10) ? adminPicker.slice(0,10) : new Date().toISOString().slice(0,10);
-                    setReportDate(d);
+          {(user?.role === 'admin' || user?.role === 'hr') && (
+            <Button variant="outline" className="flex items-center space-x-2" onClick={handleExportAttendance}>
+              <Download className="h-4 w-4" />
+              <span>Export</span>
+            </Button>
+          )}
+          {(user?.role === 'admin' || user?.role === 'hr') && (
+            <Button
+              variant="default"
+              className="flex items-center space-x-2"
+              onClick={() => {
+                // Prefill defaults based on current Admin view
+                try {
+                  if (user?.role === 'admin' || user?.role === 'hr') {
+                    if (adminType === 'daily') {
+                      setReportType('daily');
+                      const d = (adminPicker && adminPicker.length >= 10) ? adminPicker.slice(0,10) : new Date().toISOString().slice(0,10);
+                      setReportDate(d);
+                    } else {
+                      setReportType('monthly');
+                      const m = (adminPicker && adminPicker.length >= 7) ? adminPicker.slice(0,7) : new Date().toISOString().slice(0,7);
+                      setReportMonth(m);
+                    }
                   } else {
-                    setReportType('monthly');
-                    const m = (adminPicker && adminPicker.length >= 7) ? adminPicker.slice(0,7) : new Date().toISOString().slice(0,7);
-                    setReportMonth(m);
+                    // Employees: default to daily today
+                    setReportType('daily');
+                    setReportDate(new Date().toISOString().slice(0,10));
                   }
-                } else {
-                  // Employees: default to daily today
-                  setReportType('daily');
-                  setReportDate(new Date().toISOString().slice(0,10));
-                }
-              } catch {}
-              setExportFormat('excel');
-              setReportOpen(true);
-            }}
-          >
-            <Calendar className="h-4 w-4" />
-            <span>Generate Report</span>
-          </Button>
+                } catch {}
+                setExportFormat('excel');
+                setReportOpen(true);
+              }}
+            >
+              <Calendar className="h-4 w-4" />
+              <span>Generate Report</span>
+            </Button>
+          )}
         </div>
       </div>
 
@@ -1614,7 +1606,7 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
                 const daysArray = [];
                 for (let i = 0; i < startPad; i++) daysArray.push(null);
                 for (let d = 1; d <= totalDays; d++) daysArray.push(d);
-                const map = new Map((myAttendance || []).map(r => [r.date, r]));
+                const map = new Map((calendarData || []).map(r => [r.date, r]));
                 return (
                   <div className="grid grid-cols-7 gap-2">
                     {daysArray.map((day, idx) => {

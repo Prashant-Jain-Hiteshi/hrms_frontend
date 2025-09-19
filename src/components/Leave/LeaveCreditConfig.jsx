@@ -10,25 +10,22 @@ import { useData } from '../../contexts/DataContext';
 import { LeaveAPI } from '../../lib/api';
 
 const LeaveCreditConfig = () => {
-  const { } = useData();
+  const { leaveTypes, fetchLeaveTypes } = useData();
   const [configs, setConfigs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingConfig, setEditingConfig] = useState(null);
   const [formData, setFormData] = useState({
-    leaveType: 'annual',
+    leaveType: '',
     monthlyCredit: 1.67
   });
   const [notifications, setNotifications] = useState([]);
 
-  const leaveTypeOptions = [
-    { value: 'annual', label: 'Annual Leave' },
-    { value: 'sick', label: 'Sick Leave' },
-    { value: 'personal', label: 'Personal Leave' },
-    { value: 'casual', label: 'Casual Leave' },
-    { value: 'maternity', label: 'Maternity Leave' },
-    { value: 'paternity', label: 'Paternity Leave' }
-  ];
+  // Dynamic leave type options from admin-created leave types
+  const leaveTypeOptions = leaveTypes.map(type => ({
+    value: type.name, // Use original name as backend expects exact match
+    label: type.name
+  }));
 
   const notify = (type, message) => {
     const id = Date.now();
@@ -40,6 +37,7 @@ const LeaveCreditConfig = () => {
 
   useEffect(() => {
     fetchConfigs();
+    fetchLeaveTypes(); // Fetch admin-created leave types
   }, []);
 
   const fetchConfigs = async () => {
@@ -97,12 +95,24 @@ const LeaveCreditConfig = () => {
   };
 
   const handleDelete = async (leaveType) => {
-    // Not supported by backend currently
-    notify('error', 'Delete is not supported for leave credit configurations');
+    if (!confirm(`Are you sure you want to delete the credit configuration for "${leaveType}"? This action cannot be undone.`)) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await LeaveAPI.deleteCreditConfig(leaveType);
+      notify('success', res?.data?.message || 'Credit configuration deleted successfully');
+      fetchConfigs(); // Refresh the list
+    } catch (error) {
+      notify('error', error.response?.data?.message || 'Failed to delete credit configuration');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const resetForm = () => {
-    setFormData({ leaveType: 'annual', monthlyCredit: 1.67 });
+    setFormData({ leaveType: '', monthlyCredit: 1.67 });
     setEditingConfig(null);
     setShowAddForm(false);
   };
@@ -187,13 +197,24 @@ const LeaveCreditConfig = () => {
                     onChange={(e) => setFormData(prev => ({ ...prev, leaveType: e.target.value }))}
                     className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
                     disabled={editingConfig}
+                    required
                   >
-                    {leaveTypeOptions.map(option => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
+                    <option value="">Select Leave Type</option>
+                    {leaveTypeOptions.length === 0 ? (
+                      <option value="" disabled>No leave types available - Create leave types first</option>
+                    ) : (
+                      leaveTypeOptions.map(option => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))
+                    )}
                   </select>
+                  {leaveTypeOptions.length === 0 && (
+                    <p className="text-xs text-orange-600 mt-1">
+                      No leave types found. Please create leave types first in the "Leave Types" tab.
+                    </p>
+                  )}
                 </div>
 
                 <div>

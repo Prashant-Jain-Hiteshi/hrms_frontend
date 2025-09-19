@@ -92,6 +92,7 @@ export const LeaveAPI = {
   createConfig: (data) => api.post('/leave/credit-config', data),
   // Using PUT due to browser/PATCH issues
   updateConfig: (leaveType, data) => api.put(`/leave/credit-config/${encodeURIComponent(leaveType)}`, data),
+  deleteCreditConfig: (leaveType) => api.delete(`/leave/credit-config/${encodeURIComponent(leaveType)}`),
   // Trigger monthly credits processing (admin)
   triggerMonthlyCredits: () => api.post('/leave/trigger-monthly-credits'),
   // DOJ-based balance for current user
