@@ -43,7 +43,7 @@ export const PREDEFINED_USERS = [
 
 export const ROLE_PERMISSIONS = {
   admin: ['all'],
-  hr: ['employees', 'leave', 'attendance', 'recruitment', 'performance'],
+  hr: ['employees', 'leave', 'attendance', 'recruitment', 'performance', 'payroll'],
   employee: ['self-service', 'attendance', 'leave', 'documents'],
   finance: ['payroll', 'expenses', 'reports']
 };

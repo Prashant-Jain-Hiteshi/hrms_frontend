@@ -5,12 +5,16 @@ import { Input } from '../ui/Input';
 import { 
   DollarSign, Plus, Search, Filter, Calendar, 
   TrendingUp, Users, FileText, Download, Edit, 
-  Trash2, Receipt, Eye, Activity, Clock, XCircle
+  Trash2, Receipt, Eye, Activity, Clock, XCircle,
+  Settings, Building2, CreditCard, Percent
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
 import { useAuth } from '../../contexts/AuthContext';
 import { useData } from '../../contexts/DataContext';
 import PayrollProgressChart from './PayrollProgressChart';
+import { PayrollSetupAPI } from '../../lib/payrollSetupApi';
+import { toast } from 'react-toastify';
+import CompanyPayrollInfo from './CompanyPayrollInfo';
 
 const PayrollManagement = () => {
   const { user } = useAuth();
@@ -39,6 +43,33 @@ const PayrollManagement = () => {
     month: new Date().getMonth() + 1,
     year: new Date().getFullYear()
   });
+
+  // Setup Tab States
+  const [payComponents, setPayComponents] = useState([]);
+  const [bankAccounts, setBankAccounts] = useState([]);
+  const [setupLoading, setSetupLoading] = useState(false);
+  const [showComponentModal, setShowComponentModal] = useState(false);
+  const [showBankModal, setShowBankModal] = useState(false);
+  const [selectedComponent, setSelectedComponent] = useState(null);
+  const [selectedBankAccount, setSelectedBankAccount] = useState(null);
+  const [componentForm, setComponentForm] = useState({
+    name: '',
+    type: 'EARNING',
+    calculationMethod: 'FIXED',
+    value: '',
+    taxable: true,
+    description: ''
+  });
+  const [bankForm, setBankForm] = useState({
+    bankName: '',
+    branchName: '',
+    accountNumber: '',
+    ifscCode: '',
+    isDefault: false,
+    accountHolderName: '',
+    notes: ''
+  });
+  const [formErrors, setFormErrors] = useState({});
 
   // Format payroll data for charts
   const payrollData = useMemo(() => {
@@ -175,7 +206,35 @@ const PayrollManagement = () => {
   
   // Filtered reimbursements - will be populated from API when available
   const reimbursements = useMemo(() => {
-    return [];
+    return [
+      {
+        id: 1,
+        employee: 'John Doe',
+        type: 'Travel',
+        amount: 250,
+        date: '2024-02-15',
+        description: 'Client meeting travel expenses',
+        status: 'pending'
+      },
+      {
+        id: 2,
+        employee: 'Jane Smith',
+        type: 'Medical',
+        amount: 150,
+        date: '2024-02-14',
+        description: 'Health checkup reimbursement',
+        status: 'approved'
+      },
+      {
+        id: 3,
+        employee: 'Mike Johnson',
+        type: 'Office Supplies',
+        amount: 75,
+        date: '2024-02-13',
+        description: 'Laptop accessories purchase',
+        status: 'rejected'
+      }
+    ];
   }, []);
   
   // Apply filters to payroll data
@@ -224,6 +283,225 @@ const PayrollManagement = () => {
       payrollsCount: payrolls?.length || 0
     });
   }, [employeePayroll, filteredPayrolls, employees, payrolls]);
+
+  // Load setup data when setup tab is selected
+  useEffect(() => {
+    if (selectedTab === 'setup') {
+      loadSetupData();
+    }
+  }, [selectedTab]);
+
+  // Setup Tab Functions
+  const loadSetupData = async () => {
+    setSetupLoading(true);
+    try {
+      const [componentsRes, bankAccountsRes] = await Promise.all([
+        PayrollSetupAPI.getPayComponents(),
+        PayrollSetupAPI.getBankAccounts()
+      ]);
+      
+      setPayComponents(componentsRes.data || []);
+      setBankAccounts(bankAccountsRes.data || []);
+    } catch (error) {
+      console.error('Error loading setup data:', error);
+      toast.error('Failed to load setup data');
+    } finally {
+      setSetupLoading(false);
+    }
+  };
+
+  // Component Form Functions
+  const resetComponentForm = () => {
+    setComponentForm({
+      name: '',
+      type: 'EARNING',
+      calculationMethod: 'FIXED',
+      value: '',
+      taxable: true,
+      description: ''
+    });
+    setFormErrors({});
+    setSelectedComponent(null);
+  };
+
+  const validateComponentForm = () => {
+    const errors = {};
+    
+    if (!componentForm.name.trim()) {
+      errors.name = 'Component name is required';
+    }
+    
+    if (!componentForm.value || componentForm.value <= 0) {
+      errors.value = 'Value must be greater than 0';
+    }
+    
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const handleComponentSubmit = async (e) => {
+    e.preventDefault();
+    
+    if (!validateComponentForm()) {
+      return;
+    }
+
+    setSetupLoading(true);
+    try {
+      const formData = {
+        ...componentForm,
+        value: parseFloat(componentForm.value)
+      };
+
+      if (selectedComponent) {
+        await PayrollSetupAPI.updatePayComponent(selectedComponent.id, formData);
+        toast.success('Component updated successfully');
+      } else {
+        await PayrollSetupAPI.createPayComponent(formData);
+        toast.success('Component created successfully');
+      }
+
+      setShowComponentModal(false);
+      resetComponentForm();
+      loadSetupData();
+    } catch (error) {
+      console.error('Error saving component:', error);
+      toast.error(error.response?.data?.message || 'Failed to save component');
+    } finally {
+      setSetupLoading(false);
+    }
+  };
+
+  const handleEditComponent = (component) => {
+    setSelectedComponent(component);
+    setComponentForm({
+      name: component.name,
+      type: component.type,
+      calculationMethod: component.calculationMethod,
+      value: component.value.toString(),
+      taxable: component.taxable,
+      description: component.description || ''
+    });
+    setShowComponentModal(true);
+  };
+
+  const handleDeleteComponent = async (component) => {
+    if (!confirm(`Are you sure you want to delete "${component.name}"?`)) {
+      return;
+    }
+
+    setSetupLoading(true);
+    try {
+      await PayrollSetupAPI.deletePayComponent(component.id);
+      toast.success('Component deleted successfully');
+      loadSetupData();
+    } catch (error) {
+      console.error('Error deleting component:', error);
+      toast.error(error.response?.data?.message || 'Failed to delete component');
+    } finally {
+      setSetupLoading(false);
+    }
+  };
+
+  // Bank Account Form Functions
+  const resetBankForm = () => {
+    setBankForm({
+      bankName: '',
+      branchName: '',
+      accountNumber: '',
+      ifscCode: '',
+      isDefault: false,
+      accountHolderName: '',
+      notes: ''
+    });
+    setFormErrors({});
+    setSelectedBankAccount(null);
+  };
+
+  const validateBankForm = () => {
+    const errors = {};
+    
+    if (!bankForm.bankName.trim()) {
+      errors.bankName = 'Bank name is required';
+    }
+    
+    if (!bankForm.branchName.trim()) {
+      errors.branchName = 'Branch name is required';
+    }
+    
+    if (!bankForm.accountNumber.trim()) {
+      errors.accountNumber = 'Account number is required';
+    }
+    
+    if (!bankForm.ifscCode.trim()) {
+      errors.ifscCode = 'IFSC code is required';
+    } else if (bankForm.ifscCode.length !== 11) {
+      errors.ifscCode = 'IFSC code must be 11 characters';
+    }
+    
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const handleBankSubmit = async (e) => {
+    e.preventDefault();
+    
+    if (!validateBankForm()) {
+      return;
+    }
+
+    setSetupLoading(true);
+    try {
+      if (selectedBankAccount) {
+        await PayrollSetupAPI.updateBankAccount(selectedBankAccount.id, bankForm);
+        toast.success('Bank account updated successfully');
+      } else {
+        await PayrollSetupAPI.createBankAccount(bankForm);
+        toast.success('Bank account created successfully');
+      }
+
+      setShowBankModal(false);
+      resetBankForm();
+      loadSetupData();
+    } catch (error) {
+      console.error('Error saving bank account:', error);
+      toast.error(error.response?.data?.message || 'Failed to save bank account');
+    } finally {
+      setSetupLoading(false);
+    }
+  };
+
+  const handleEditBankAccount = (bankAccount) => {
+    setSelectedBankAccount(bankAccount);
+    setBankForm({
+      bankName: bankAccount.bankName,
+      branchName: bankAccount.branchName,
+      accountNumber: bankAccount.accountNumber,
+      ifscCode: bankAccount.ifscCode,
+      isDefault: bankAccount.isDefault,
+      accountHolderName: bankAccount.accountHolderName || '',
+      notes: bankAccount.notes || ''
+    });
+    setShowBankModal(true);
+  };
+
+  const handleDeleteBankAccount = async (bankAccount) => {
+    if (!confirm(`Are you sure you want to delete "${bankAccount.bankName}" account?`)) {
+      return;
+    }
+
+    setSetupLoading(true);
+    try {
+      await PayrollSetupAPI.deleteBankAccount(bankAccount.id);
+      toast.success('Bank account deleted successfully');
+      loadSetupData();
+    } catch (error) {
+      console.error('Error deleting bank account:', error);
+      toast.error(error.response?.data?.message || 'Failed to delete bank account');
+    } finally {
+      setSetupLoading(false);
+    }
+  };
   
   // Handle filter changes
   const handleFilterChange = (key, value) => {
@@ -374,7 +652,10 @@ const PayrollManagement = () => {
       {/* Tabs */}
       <div className="border-b border-gray-200 dark:border-gray-700">
         <nav className="-mb-px flex space-x-8">
-          {['overview', 'payroll', 'reimbursements'].map((tab) => (
+          {(user?.role === 'hr' 
+            ? ['overview', 'payroll'] 
+            : ['overview', 'payroll', 'setup', 'templates', 'settings', 'reimbursements']
+          ).map((tab) => (
             <button
               key={tab}
               onClick={() => setSelectedTab(tab)}
@@ -619,6 +900,278 @@ const PayrollManagement = () => {
         </div>
       )}
 
+      {/* Setup Tab */}
+      {selectedTab === 'setup' && (
+        <div className="space-y-6">
+          {/* Quick Actions */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center space-x-2">
+                <Settings className="h-5 w-5" />
+                <span>Payroll Setup</span>
+              </CardTitle>
+              <CardDescription>
+                Configure pay components and bank accounts for payroll processing
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-wrap gap-4">
+                <Button 
+                  onClick={() => {
+                    resetComponentForm();
+                    setShowComponentModal(true);
+                  }}
+                  className="flex items-center space-x-2"
+                >
+                  <Plus className="h-4 w-4" />
+                  <span>Add Component</span>
+                </Button>
+                <Button 
+                  onClick={() => {
+                    resetBankForm();
+                    setShowBankModal(true);
+                  }}
+                  variant="outline"
+                  className="flex items-center space-x-2"
+                >
+                  <Building2 className="h-4 w-4" />
+                  <span>Add Bank Account</span>
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Pay Components Section */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center space-x-2">
+                <DollarSign className="h-5 w-5" />
+                <span>Pay Components</span>
+              </CardTitle>
+              <CardDescription>
+                Manage salary components like basic salary, allowances, and deductions
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {setupLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                </div>
+              ) : payComponents.length === 0 ? (
+                <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                  No pay components configured yet. Add your first component to get started.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {payComponents.map((component) => (
+                    <div
+                      key={component.id}
+                      className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 hover:shadow-md transition-shadow"
+                    >
+                      <div className="flex items-start justify-between mb-2">
+                        <div className="flex items-center space-x-2">
+                          {component.type === 'EARNING' ? (
+                            <TrendingUp className="h-4 w-4 text-green-500" />
+                          ) : (
+                            <TrendingUp className="h-4 w-4 text-red-500 rotate-180" />
+                          )}
+                          <h3 className="font-medium text-sm">{component.name}</h3>
+                        </div>
+                        <div className="flex items-center space-x-1">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleEditComponent(component)}
+                            className="h-8 w-8 p-0"
+                          >
+                            <Edit className="h-3 w-3" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleDeleteComponent(component)}
+                            className="h-8 w-8 p-0 text-red-500 hover:text-red-700"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="space-y-1 text-xs text-gray-600 dark:text-gray-400">
+                        <div className="flex justify-between">
+                          <span>Type:</span>
+                          <span className={`px-2 py-1 rounded text-xs ${
+                            component.type === 'EARNING' 
+                              ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+                              : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+                          }`}>
+                            {component.type}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Method:</span>
+                          <span>{component.calculationMethod}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Value:</span>
+                          <span className="font-medium">
+                            {component.calculationMethod === 'FIXED' ? '$' : ''}{component.value}
+                            {component.calculationMethod !== 'FIXED' ? '%' : ''}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Taxable:</span>
+                          <span>{component.taxable ? 'Yes' : 'No'}</span>
+                        </div>
+                      </div>
+                      {component.description && (
+                        <p className="text-xs text-gray-500 mt-2">{component.description}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Bank Accounts Section */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center space-x-2">
+                <Building2 className="h-5 w-5" />
+                <span>Company Bank Accounts</span>
+              </CardTitle>
+              <CardDescription>
+                Manage bank accounts for salary payments
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {setupLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                </div>
+              ) : bankAccounts.length === 0 ? (
+                <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                  No bank accounts configured yet. Add your first bank account to get started.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {bankAccounts.map((account) => (
+                    <div
+                      key={account.id}
+                      className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 hover:shadow-md transition-shadow"
+                    >
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex items-center space-x-2">
+                          <CreditCard className="h-4 w-4 text-blue-500" />
+                          <h3 className="font-medium text-sm">{account.bankName}</h3>
+                          {account.isDefault && (
+                            <span className="px-2 py-1 bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 text-xs rounded">
+                              Default
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center space-x-1">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleEditBankAccount(account)}
+                            className="h-8 w-8 p-0"
+                          >
+                            <Edit className="h-3 w-3" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleDeleteBankAccount(account)}
+                            className="h-8 w-8 p-0 text-red-500 hover:text-red-700"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="space-y-2 text-xs text-gray-600 dark:text-gray-400">
+                        <div className="flex justify-between">
+                          <span>Branch:</span>
+                          <span>{account.branchName}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Account:</span>
+                          <span className="font-mono">****{account.accountNumber.slice(-4)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>IFSC:</span>
+                          <span className="font-mono">{account.ifscCode}</span>
+                        </div>
+                        {account.accountHolderName && (
+                          <div className="flex justify-between">
+                            <span>Holder:</span>
+                            <span>{account.accountHolderName}</span>
+                          </div>
+                        )}
+                      </div>
+                      {account.notes && (
+                        <p className="text-xs text-gray-500 mt-2">{account.notes}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Templates Tab - Placeholder */}
+      {selectedTab === 'templates' && (
+        <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center space-x-2">
+                <FileText className="h-5 w-5" />
+                <span>Salary Templates</span>
+              </CardTitle>
+              <CardDescription>
+                Create and manage salary templates for different employee categories
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p className="text-lg font-medium mb-2">Templates Coming Soon</p>
+                <p className="text-sm">This feature will be available in the next update.</p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Settings Tab */}
+      {selectedTab === 'settings' && (
+        <div className="space-y-6">
+          <CompanyPayrollInfo />
+          
+          {/* Future sections placeholder */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center space-x-2">
+                <Settings className="h-5 w-5" />
+                <span>Additional Settings</span>
+              </CardTitle>
+              <CardDescription>
+                Statutory settings and other configurations
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                <Settings className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p className="text-lg font-medium mb-2">More Settings Coming Soon</p>
+                <p className="text-sm">Statutory settings, tax configurations, and compliance features will be available in the next update.</p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       {/* Reimbursements Tab */}
       {selectedTab === 'reimbursements' && (
         <div className="space-y-6">
@@ -695,7 +1248,7 @@ const PayrollManagement = () => {
                               variant="outline" 
                               size="sm"
                               onClick={() => {
-                                setSelectedPayroll(record);
+                                setSelectedPayroll(request);
                                 setShowDetailsModal(true);
                               }}
                             >
@@ -902,6 +1455,282 @@ const PayrollManagement = () => {
                 Generate Payslip
               </Button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Component Modal */}
+      {showComponentModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-medium text-gray-900 dark:text-white">
+                {selectedComponent ? 'Edit Component' : 'Add Component'}
+              </h3>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowComponentModal(false)}
+                className="h-8 w-8 p-0"
+              >
+                <XCircle className="h-4 w-4" />
+              </Button>
+            </div>
+            
+            <form onSubmit={handleComponentSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Component Name *
+                </label>
+                <Input
+                  type="text"
+                  value={componentForm.name}
+                  onChange={(e) => setComponentForm(prev => ({ ...prev, name: e.target.value }))}
+                  placeholder="e.g., Basic Salary, HRA, PF"
+                  className={formErrors.name ? 'border-red-500' : ''}
+                />
+                {formErrors.name && (
+                  <p className="text-red-500 text-xs mt-1">{formErrors.name}</p>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Type *
+                  </label>
+                  <select
+                    value={componentForm.type}
+                    onChange={(e) => setComponentForm(prev => ({ ...prev, type: e.target.value }))}
+                    className="w-full h-10 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                  >
+                    <option value="EARNING">Earning</option>
+                    <option value="DEDUCTION">Deduction</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Method *
+                  </label>
+                  <select
+                    value={componentForm.calculationMethod}
+                    onChange={(e) => setComponentForm(prev => ({ ...prev, calculationMethod: e.target.value }))}
+                    className="w-full h-10 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                  >
+                    <option value="FIXED">Fixed Amount</option>
+                    <option value="PERCENTAGE_OF_BASIC">Percentage of Basic</option>
+                    <option value="PERCENTAGE_OF_CTC">Percentage of CTC</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Value * {componentForm.calculationMethod === 'FIXED' ? '(₹)' : '(%)'}
+                </label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={componentForm.value}
+                  onChange={(e) => setComponentForm(prev => ({ ...prev, value: e.target.value }))}
+                  placeholder={componentForm.calculationMethod === 'FIXED' ? '50000' : '10'}
+                  className={formErrors.value ? 'border-red-500' : ''}
+                />
+                {formErrors.value && (
+                  <p className="text-red-500 text-xs mt-1">{formErrors.value}</p>
+                )}
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  id="taxable"
+                  checked={componentForm.taxable}
+                  onChange={(e) => setComponentForm(prev => ({ ...prev, taxable: e.target.checked }))}
+                  className="h-4 w-4 text-primary focus:ring-primary border-gray-300 rounded"
+                />
+                <label htmlFor="taxable" className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Taxable Component
+                </label>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Description
+                </label>
+                <textarea
+                  value={componentForm.description}
+                  onChange={(e) => setComponentForm(prev => ({ ...prev, description: e.target.value }))}
+                  placeholder="Optional description for this component"
+                  rows={3}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                />
+              </div>
+
+              <div className="flex justify-end space-x-3 pt-4">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowComponentModal(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={setupLoading}
+                  className="flex items-center space-x-2"
+                >
+                  {setupLoading && <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>}
+                  <span>{selectedComponent ? 'Update' : 'Create'}</span>
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Bank Account Modal */}
+      {showBankModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-medium text-gray-900 dark:text-white">
+                {selectedBankAccount ? 'Edit Bank Account' : 'Add Bank Account'}
+              </h3>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowBankModal(false)}
+                className="h-8 w-8 p-0"
+              >
+                <XCircle className="h-4 w-4" />
+              </Button>
+            </div>
+            
+            <form onSubmit={handleBankSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Bank Name *
+                </label>
+                <Input
+                  type="text"
+                  value={bankForm.bankName}
+                  onChange={(e) => setBankForm(prev => ({ ...prev, bankName: e.target.value }))}
+                  placeholder="e.g., State Bank of India"
+                  className={formErrors.bankName ? 'border-red-500' : ''}
+                />
+                {formErrors.bankName && (
+                  <p className="text-red-500 text-xs mt-1">{formErrors.bankName}</p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Branch Name *
+                </label>
+                <Input
+                  type="text"
+                  value={bankForm.branchName}
+                  onChange={(e) => setBankForm(prev => ({ ...prev, branchName: e.target.value }))}
+                  placeholder="e.g., Mumbai Main Branch"
+                  className={formErrors.branchName ? 'border-red-500' : ''}
+                />
+                {formErrors.branchName && (
+                  <p className="text-red-500 text-xs mt-1">{formErrors.branchName}</p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Account Number *
+                </label>
+                <Input
+                  type="text"
+                  value={bankForm.accountNumber}
+                  onChange={(e) => setBankForm(prev => ({ ...prev, accountNumber: e.target.value }))}
+                  placeholder="e.g., 1234567890123456"
+                  className={formErrors.accountNumber ? 'border-red-500' : ''}
+                />
+                {formErrors.accountNumber && (
+                  <p className="text-red-500 text-xs mt-1">{formErrors.accountNumber}</p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  IFSC Code *
+                </label>
+                <Input
+                  type="text"
+                  value={bankForm.ifscCode}
+                  onChange={(e) => setBankForm(prev => ({ ...prev, ifscCode: e.target.value.toUpperCase() }))}
+                  placeholder="e.g., SBIN0000123"
+                  maxLength={11}
+                  className={formErrors.ifscCode ? 'border-red-500' : ''}
+                />
+                {formErrors.ifscCode && (
+                  <p className="text-red-500 text-xs mt-1">{formErrors.ifscCode}</p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Account Holder Name
+                </label>
+                <Input
+                  type="text"
+                  value={bankForm.accountHolderName}
+                  onChange={(e) => setBankForm(prev => ({ ...prev, accountHolderName: e.target.value }))}
+                  placeholder="e.g., ABC Company Pvt Ltd"
+                />
+              </div>
+
+              <div className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  id="isDefault"
+                  checked={bankForm.isDefault}
+                  onChange={(e) => setBankForm(prev => ({ ...prev, isDefault: e.target.checked }))}
+                  className="h-4 w-4 text-primary focus:ring-primary border-gray-300 rounded"
+                />
+                <label htmlFor="isDefault" className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Set as default account
+                </label>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Notes
+                </label>
+                <textarea
+                  value={bankForm.notes}
+                  onChange={(e) => setBankForm(prev => ({ ...prev, notes: e.target.value }))}
+                  placeholder="Optional notes about this account"
+                  rows={3}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                />
+              </div>
+
+              <div className="flex justify-end space-x-3 pt-4">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowBankModal(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={setupLoading}
+                  className="flex items-center space-x-2"
+                >
+                  {setupLoading && <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>}
+                  <span>{selectedBankAccount ? 'Update' : 'Create'}</span>
+                </Button>
+              </div>
+            </form>
           </div>
         </div>
       )}

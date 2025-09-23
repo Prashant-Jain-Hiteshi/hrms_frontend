@@ -10,6 +10,8 @@ import AdminDashboard from './components/Dashboard/AdminDashboard';
 import HRDashboard from './components/Dashboard/HRDashboard';
 import EmployeeDashboard from './components/Dashboard/EmployeeDashboard';
 import FinanceDashboard from './components/Dashboard/FinanceDashboard';
+import { ToastContainer } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 
 // Dashboard Router Component
 const DashboardRouter = () => {
@@ -76,6 +78,18 @@ function App() {
               </Route>
             </Routes>
           </div>
+          <ToastContainer
+            position="top-right"
+            autoClose={3000}
+            hideProgressBar={false}
+            newestOnTop={false}
+            closeOnClick
+            rtl={false}
+            pauseOnFocusLoss
+            draggable
+            pauseOnHover
+            theme="colored"
+          />
         </Router>
         </DataProvider>
       </AuthProvider>
