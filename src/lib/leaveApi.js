@@ -24,6 +24,9 @@ export const LeaveAPI = {
   monthlyLedger: ({ from, to, employeeId } = {}) =>
     api.get('/leave/monthly-ledger', { params: { ...(from ? { from } : {}), ...(to ? { to } : {}), ...(employeeId ? { employeeId } : {}) } }),
 
+  // Save monthly leave records (called when employee views Leave Balance UI)
+  saveMonthlyRecords: (monthlyRecords) => api.post('/leave/save-monthly-records', { monthlyRecords }),
+
   // Get leave statistics
   statistics: (employeeId) => api.get('/leave/statistics', { params: { employeeId } }),
 

@@ -1133,6 +1133,62 @@ const LeaveManagement = () => {
 
   const ledgerRows = buildLedger();
 
+  // Save monthly leave records to database when employee checks Leave Balance
+  const saveMonthlyLeaveRecords = async (records) => {
+    try {
+      console.log('🔍 DEBUG - Raw records from buildLedger:', records);
+      
+      // Clean the data before sending (convert '-' and NaN to 0)
+      const cleanedRecords = records.map(record => ({
+        ...record,
+        opening: typeof record.opening === 'number' && !isNaN(record.opening) ? record.opening : 0,
+        monthlyCredit: typeof record.monthlyCredit === 'number' && !isNaN(record.monthlyCredit) ? record.monthlyCredit : 0,
+        extraCredit: typeof record.extraCredit === 'number' && !isNaN(record.extraCredit) ? record.extraCredit : 0,
+        closing: typeof record.closing === 'number' && !isNaN(record.closing) ? record.closing : 0,
+        deducted: typeof record.deducted === 'number' && !isNaN(record.deducted) ? record.deducted : 0,
+        lwp: typeof record.lwp === 'number' && !isNaN(record.lwp) ? record.lwp : 0,
+        present: typeof record.present === 'number' && !isNaN(record.present) ? record.present : 0,
+        absent: typeof record.absent === 'number' && !isNaN(record.absent) ? record.absent : 0,
+        effPresent: typeof record.effPresent === 'number' && !isNaN(record.effPresent) ? record.effPresent : 0,
+        effAbsent: typeof record.effAbsent === 'number' && !isNaN(record.effAbsent) ? record.effAbsent : 0,
+        paidDays: typeof record.paidDays === 'number' && !isNaN(record.paidDays) ? record.paidDays : 0,
+      }));
+      
+      console.log('🔍 DEBUG - Cleaned records for backend:', cleanedRecords);
+      
+      const { data } = await LeaveAPI.saveMonthlyRecords(cleanedRecords);
+      console.log('✅ Monthly leave records saved successfully:', data);
+      
+      // Show success notification
+      addNotification('success', `Saved ${data.recordCount} monthly leave records`);
+    } catch (error) {
+      console.error('❌ Error saving monthly leave records:', error);
+      addNotification('error', 'Error saving leave balance data');
+    }
+  };
+
+  // Auto-save monthly records ONLY when Leave Balance tab is selected
+  React.useEffect(() => {
+    console.log('🔍 DEBUG - useEffect triggered with:', {
+      selectedTab,
+      ledgerRowsLength: ledgerRows?.length || 0,
+      userRole: user?.role,
+      shouldSave: selectedTab === 'leavebalance' && ledgerRows && ledgerRows.length > 0 && user?.role === 'employee'
+    });
+    
+    if (selectedTab === 'leavebalance' && ledgerRows && ledgerRows.length > 0 && user?.role === 'employee') {
+      // Only save for employees (not admin/HR) and only on Leave Balance tab
+      console.log('✅ DEBUG - Conditions met! Auto-saving monthly records for employee on Leave Balance tab');
+      saveMonthlyLeaveRecords(ledgerRows);
+    } else {
+      console.log('❌ DEBUG - Conditions not met for saving monthly records:', {
+        isBalanceTab: selectedTab === 'leavebalance',
+        hasLedgerRows: ledgerRows && ledgerRows.length > 0,
+        isEmployee: user?.role === 'employee'
+      });
+    }
+  }, [selectedTab, ledgerRows, user?.role]); // Added selectedTab dependency
+
   return (
     <div className="space-y-6">
       {/* Toast Notifications */}

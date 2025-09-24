@@ -13,6 +13,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useData } from '../../contexts/DataContext';
 import PayrollProgressChart from './PayrollProgressChart';
 import { PayrollSetupAPI } from '../../lib/payrollSetupApi';
+import { HRPayrollAPI } from '../../lib/hrPayrollApi';
 import { toast } from 'react-toastify';
 import CompanyPayrollInfo from './CompanyPayrollInfo';
 
@@ -47,6 +48,22 @@ const PayrollManagement = () => {
   // Setup Tab States
   const [payComponents, setPayComponents] = useState([]);
   const [bankAccounts, setBankAccounts] = useState([]);
+  
+  // Tax & Compliance Tab States
+  const [taxConfigData, setTaxConfigData] = useState({
+    pfMinimumSalary: '',
+    pfEmployeeRate: '',
+    pfEmployerRate: '',
+    esiMinimumSalary: '',
+    esiEmployeeRate: '',
+    esiEmployerRate: '',
+    professionalTaxAmount: '',
+    professionalTaxMinimumSalary: '',
+    tdsExemptionLimit: '',
+    notes: ''
+  });
+  const [taxConfigErrors, setTaxConfigErrors] = useState({});
+  const [taxConfigLoading, setTaxConfigLoading] = useState(false);
   const [setupLoading, setSetupLoading] = useState(false);
   const [showComponentModal, setShowComponentModal] = useState(false);
   const [showBankModal, setShowBankModal] = useState(false);
@@ -70,6 +87,22 @@ const PayrollManagement = () => {
     notes: ''
   });
   const [formErrors, setFormErrors] = useState({});
+
+  // HR Payroll States
+  const [hrPayrollRecords, setHrPayrollRecords] = useState([]);
+  const [hrPayrollSummary, setHrPayrollSummary] = useState(null);
+  const [hrPayrollLoading, setHrPayrollLoading] = useState(false);
+  const [selectedEmployees, setSelectedEmployees] = useState([]);
+  const [payrollMonth, setPayrollMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
+  const [showCalculateModal, setShowCalculateModal] = useState(false);
+  const [showAdjustModal, setShowAdjustModal] = useState(false);
+  const [selectedPayrollRecord, setSelectedPayrollRecord] = useState(null);
+  const [adjustmentForm, setAdjustmentForm] = useState({
+    adjustmentType: 'ALLOWANCE',
+    adjustmentName: '',
+    amount: '',
+    reason: ''
+  });
 
   // Format payroll data for charts
   const payrollData = useMemo(() => {
@@ -291,7 +324,213 @@ const PayrollManagement = () => {
     }
   }, [selectedTab]);
 
+  // Load tax config data when tax compliance tab is selected
+  useEffect(() => {
+    if (selectedTab === 'taxcompliance') {
+      loadTaxConfigData();
+    }
+  }, [selectedTab]);
+
+  // Load HR payroll data when payroll tab is selected
+  useEffect(() => {
+    if (selectedTab === 'payroll') {
+      loadHRPayrollData();
+    }
+  }, [selectedTab, payrollMonth]);
+
+  // HR Payroll Functions
+  const loadHRPayrollData = async () => {
+    setHrPayrollLoading(true);
+    try {
+      const [recordsRes, summaryRes] = await Promise.all([
+        HRPayrollAPI.getPayrollRecords(payrollMonth),
+        HRPayrollAPI.getPayrollSummary(payrollMonth)
+      ]);
+      
+      setHrPayrollRecords(recordsRes.data || []);
+      setHrPayrollSummary(summaryRes.data || null);
+    } catch (error) {
+      console.error('Error loading HR payroll data:', error);
+      toast.error('Failed to load payroll data');
+    } finally {
+      setHrPayrollLoading(false);
+    }
+  };
+
+  const handleCalculatePayroll = async () => {
+    if (selectedEmployees.length === 0) {
+      toast.error('Please select employees to calculate payroll');
+      return;
+    }
+
+    setHrPayrollLoading(true);
+    try {
+      const response = await HRPayrollAPI.calculatePayrollBatch({
+        employeeIds: selectedEmployees,
+        month: payrollMonth
+      });
+
+      if (response.data.success) {
+        toast.success(`Payroll calculated for ${response.data.processed} employees`);
+        if (response.data.failed > 0) {
+          toast.warning(`${response.data.failed} employees failed to process`);
+        }
+        loadHRPayrollData(); // Reload data
+        setSelectedEmployees([]);
+        setShowCalculateModal(false);
+      } else {
+        toast.error('Failed to calculate payroll');
+      }
+    } catch (error) {
+      console.error('Error calculating payroll:', error);
+      toast.error('Failed to calculate payroll');
+    } finally {
+      setHrPayrollLoading(false);
+    }
+  };
+
+  const handleBulkApprove = async () => {
+    const calculatedRecords = hrPayrollRecords.filter(record => record.status === 'CALCULATED');
+    
+    if (calculatedRecords.length === 0) {
+      toast.error('No calculated records to approve');
+      return;
+    }
+
+    setHrPayrollLoading(true);
+    try {
+      const response = await HRPayrollAPI.bulkApprovePayroll({
+        payrollRecordIds: calculatedRecords.map(record => record.id),
+        approvalNotes: 'Bulk approved by HR'
+      });
+
+      toast.success(`Approved ${calculatedRecords.length} payroll records`);
+      loadHRPayrollData(); // Reload data
+    } catch (error) {
+      console.error('Error approving payroll:', error);
+      toast.error('Failed to approve payroll records');
+    } finally {
+      setHrPayrollLoading(false);
+    }
+  };
+
+  const handleEmployeeSelection = (employeeId, isSelected) => {
+    if (isSelected) {
+      setSelectedEmployees(prev => [...prev, employeeId]);
+    } else {
+      setSelectedEmployees(prev => prev.filter(id => id !== employeeId));
+    }
+  };
+
+  const handleSelectAllEmployees = (isSelected) => {
+    if (isSelected) {
+      setSelectedEmployees(hrPayrollRecords.map(record => record.id));
+    } else {
+      setSelectedEmployees([]);
+    }
+  };
+
+  // HR Payroll Status Colors
+  const getHRPayrollStatusColor = (status) => {
+    switch (status) {
+      case 'DRAFT':
+        return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300';
+      case 'CALCULATED':
+        return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300';
+      case 'HR_APPROVED':
+        return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300';
+      case 'PROCESSED':
+        return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300';
+      default:
+        return 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300';
+    }
+  };
+
   // Setup Tab Functions
+  // Tax & Compliance Functions
+  const loadTaxConfigData = async () => {
+    setTaxConfigLoading(true);
+    try {
+      const response = await PayrollSetupAPI.getStatutorySettings();
+      if (response.data) {
+        setTaxConfigData({
+          pfMinimumSalary: response.data.pfMinimumSalary || '',
+          pfEmployeeRate: response.data.pfEmployeeRate || '',
+          pfEmployerRate: response.data.pfEmployerRate || '',
+          esiMinimumSalary: response.data.esiMinimumSalary || '',
+          esiEmployeeRate: response.data.esiEmployeeRate || '',
+          esiEmployerRate: response.data.esiEmployerRate || '',
+          professionalTaxAmount: response.data.professionalTaxAmount || '',
+          professionalTaxMinimumSalary: response.data.professionalTaxMinimumSalary || '',
+          tdsExemptionLimit: response.data.tdsExemptionLimit || '',
+          notes: response.data.notes || ''
+        });
+      }
+    } catch (error) {
+      console.error('Error loading tax config:', error);
+      toast.error('Failed to load tax configuration');
+    } finally {
+      setTaxConfigLoading(false);
+    }
+  };
+
+  const validateTaxConfigForm = () => {
+    const errors = {};
+    
+    // Basic validation - all fields are optional, but if provided must be valid numbers
+    const numericFields = [
+      'pfMinimumSalary', 'pfEmployeeRate', 'pfEmployerRate',
+      'esiMinimumSalary', 'esiEmployeeRate', 'esiEmployerRate',
+      'professionalTaxAmount', 'professionalTaxMinimumSalary', 'tdsExemptionLimit'
+    ];
+    
+    numericFields.forEach(field => {
+      const value = taxConfigData[field];
+      if (value !== '' && (isNaN(value) || Number(value) < 0)) {
+        errors[field] = 'Must be a valid positive number';
+      }
+    });
+    
+    // Percentage fields should not exceed 100
+    const percentageFields = ['pfEmployeeRate', 'pfEmployerRate', 'esiEmployeeRate', 'esiEmployerRate'];
+    percentageFields.forEach(field => {
+      const value = taxConfigData[field];
+      if (value !== '' && Number(value) > 100) {
+        errors[field] = 'Percentage cannot exceed 100%';
+      }
+    });
+    
+    setTaxConfigErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const handleTaxConfigSubmit = async (e) => {
+    e.preventDefault();
+    if (!validateTaxConfigForm()) return;
+    
+    setTaxConfigLoading(true);
+    try {
+      // Convert empty strings to null for API
+      const formData = {};
+      Object.keys(taxConfigData).forEach(key => {
+        if (key === 'notes') {
+          formData[key] = taxConfigData[key];
+        } else {
+          formData[key] = taxConfigData[key] === '' ? null : Number(taxConfigData[key]);
+        }
+      });
+
+      await PayrollSetupAPI.updateStatutorySettings(formData);
+      toast.success('Tax configuration updated successfully');
+      loadTaxConfigData(); // Reload to get updated data
+    } catch (error) {
+      console.error('Error saving tax config:', error);
+      toast.error(error.response?.data?.message || 'Failed to save tax configuration');
+    } finally {
+      setTaxConfigLoading(false);
+    }
+  };
+
   const loadSetupData = async () => {
     setSetupLoading(true);
     try {
@@ -654,7 +893,7 @@ const PayrollManagement = () => {
         <nav className="-mb-px flex space-x-8">
           {(user?.role === 'hr' 
             ? ['overview', 'payroll'] 
-            : ['overview', 'payroll', 'setup', 'templates', 'settings', 'reimbursements']
+            : ['overview', 'payroll', 'setup', 'templates', 'settings', 'taxcompliance', 'reimbursements']
           ).map((tab) => (
             <button
               key={tab}
@@ -665,7 +904,7 @@ const PayrollManagement = () => {
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
               }`}
             >
-              {tab}
+              {tab === 'taxcompliance' ? 'Tax & Compliance' : tab}
             </button>
           ))}
         </nav>
@@ -802,35 +1041,83 @@ const PayrollManagement = () => {
               <CardDescription>Manage employee salaries and payslips</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="flex items-center space-x-4 mb-6">
-                <div className="relative flex-1 max-w-sm">
-                  <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                  <Input
-                    placeholder="Search employees..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10"
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center space-x-4">
+                  <div className="relative flex-1 max-w-sm">
+                    <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                    <Input
+                      placeholder="Search employees..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="pl-10"
+                    />
+                  </div>
+                  <input
+                    type="month"
+                    value={payrollMonth}
+                    onChange={(e) => setPayrollMonth(e.target.value)}
+                    className="px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700"
                   />
+                  <Button variant="outline" className="flex items-center space-x-2">
+                    <Filter className="h-4 w-4" />
+                    <span>Filter</span>
+                  </Button>
                 </div>
-                <select 
-                  value={selectedMonth}
-                  onChange={(e) => setSelectedMonth(e.target.value)}
-                  className="px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700"
-                >
-                  <option value="2024-02">February 2024</option>
-                  <option value="2024-01">January 2024</option>
-                  <option value="2023-12">December 2023</option>
-                </select>
-                <Button variant="outline" className="flex items-center space-x-2">
-                  <Filter className="h-4 w-4" />
-                  <span>Filter</span>
-                </Button>
+                
+                <div className="flex items-center space-x-3">
+                  <Button 
+                    onClick={() => setShowCalculateModal(true)}
+                    className="bg-blue-600 hover:bg-blue-700 text-white flex items-center space-x-2"
+                    disabled={hrPayrollLoading}
+                  >
+                    <Plus className="h-4 w-4" />
+                    <span>Calculate Payroll</span>
+                  </Button>
+                  <Button 
+                    onClick={handleBulkApprove}
+                    variant="outline"
+                    disabled={selectedEmployees.length === 0 || hrPayrollLoading}
+                    className="flex items-center space-x-2"
+                  >
+                    <span>Approve Selected ({selectedEmployees.length})</span>
+                  </Button>
+                </div>
               </div>
+
+              {/* Summary Cards */}
+              {hrPayrollSummary && (
+                <div className="grid grid-cols-4 gap-4 mb-6">
+                  <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
+                    <div className="text-2xl font-bold text-blue-600">{hrPayrollSummary.totalEmployees}</div>
+                    <div className="text-sm text-gray-600 dark:text-gray-400">Total Employees</div>
+                  </div>
+                  <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg">
+                    <div className="text-2xl font-bold text-green-600">₹{hrPayrollSummary.totalNetSalary?.toLocaleString()}</div>
+                    <div className="text-sm text-gray-600 dark:text-gray-400">Total Net Salary</div>
+                  </div>
+                  <div className="bg-yellow-50 dark:bg-yellow-900/20 p-4 rounded-lg">
+                    <div className="text-2xl font-bold text-yellow-600">{hrPayrollSummary.statusBreakdown?.calculated || 0}</div>
+                    <div className="text-sm text-gray-600 dark:text-gray-400">Pending Approval</div>
+                  </div>
+                  <div className="bg-purple-50 dark:bg-purple-900/20 p-4 rounded-lg">
+                    <div className="text-2xl font-bold text-purple-600">{hrPayrollSummary.statusBreakdown?.approved || 0}</div>
+                    <div className="text-sm text-gray-600 dark:text-gray-400">Approved</div>
+                  </div>
+                </div>
+              )}
 
               <div className="overflow-x-auto">
                 <table className="w-full">
                   <thead>
                     <tr className="border-b border-gray-200 dark:border-gray-700">
+                      <th className="w-12 py-3 px-4">
+                        <input 
+                          type="checkbox" 
+                          onChange={(e) => handleSelectAllEmployees(e.target.checked)}
+                          checked={selectedEmployees.length > 0 && selectedEmployees.length === hrPayrollRecords.length}
+                          className="rounded border-gray-300"
+                        />
+                      </th>
                       <th className="text-left py-3 px-4 font-medium text-gray-900 dark:text-white">Employee</th>
                       <th className="text-left py-3 px-4 font-medium text-gray-900 dark:text-white">Department</th>
                       <th className="text-left py-3 px-4 font-medium text-gray-900 dark:text-white">Basic Salary</th>
@@ -842,56 +1129,105 @@ const PayrollManagement = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredPayrolls.map((employee) => (
-                      <tr key={employee.id} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
-                        <td className="py-3 px-4">
-                          <div className="flex items-center space-x-3">
-                            <div className="bg-primary/10 rounded-full p-2">
-                              <Users className="h-4 w-4 text-primary" />
-                            </div>
-                            <div>
-                              <div className="font-medium">{employee.name}</div>
-                              <div className="text-sm text-gray-500">{employee.position}</div>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="py-3 px-4 text-sm">{employee.department}</td>
-                        <td className="py-3 px-4 text-sm">${employee.basicSalary.toLocaleString()}</td>
-                        <td className="py-3 px-4 text-sm">${employee.allowances.toLocaleString()}</td>
-                        <td className="py-3 px-4 text-sm">${employee.deductions.toLocaleString()}</td>
-                        <td className="py-3 px-4 text-sm font-medium">${employee.netSalary.toLocaleString()}</td>
-                        <td className="py-3 px-4">
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(employee.status)}`}>
-                            {employee.status.toUpperCase()}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4">
-                          <div className="flex space-x-2">
-                            <Button 
-                              size="sm" 
-                              variant="outline"
-                              onClick={() => generatePayslip(employee)}
-                              className="flex items-center space-x-1"
-                            >
-                              <FileText className="h-3 w-3" />
-                              <span>Payslip</span>
-                            </Button>
-                            <Button 
-                              size="sm" 
-                              variant="outline"
-                              onClick={() => {
-                                setSelectedEmployee(employee);
-                                setShowViewModal(true);
-                              }}
-                              title="View Details"
-                            >
-                              <Eye className="h-3 w-3 mr-1" />
-                              <span>View</span>
-                            </Button>
+                    {hrPayrollLoading ? (
+                      <tr>
+                        <td colSpan="9" className="py-8 text-center">
+                          <div className="flex items-center justify-center space-x-2">
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                            <span>Loading payroll data...</span>
                           </div>
                         </td>
                       </tr>
-                    ))}
+                    ) : hrPayrollRecords.length === 0 ? (
+                      <tr>
+                        <td colSpan="9" className="py-8 text-center text-gray-500">
+                          No payroll records found for {payrollMonth}. Click "Calculate Payroll" to generate records.
+                        </td>
+                      </tr>
+                    ) : (
+                      hrPayrollRecords
+                        .filter(record => 
+                          !searchTerm || 
+                          record.employee?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                          record.employee?.department?.toLowerCase().includes(searchTerm.toLowerCase())
+                        )
+                        .map((record) => (
+                          <tr key={record.id} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
+                            <td className="py-3 px-4">
+                              <input 
+                                type="checkbox" 
+                                checked={selectedEmployees.includes(record.id)}
+                                onChange={(e) => handleEmployeeSelection(record.id, e.target.checked)}
+                                className="rounded border-gray-300"
+                              />
+                            </td>
+                            <td className="py-3 px-4">
+                              <div className="flex items-center space-x-3">
+                                <div className="bg-primary/10 rounded-full p-2">
+                                  <Users className="h-4 w-4 text-primary" />
+                                </div>
+                                <div>
+                                  <div className="font-medium">{record.employee?.name || 'Unknown'}</div>
+                                  <div className="text-sm text-gray-500">{record.employee?.designation || 'N/A'}</div>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="py-3 px-4 text-sm">{record.employee?.department || 'N/A'}</td>
+                            <td className="py-3 px-4 text-sm">₹{Number(record.baseSalary || 0).toLocaleString()}</td>
+                            <td className="py-3 px-4 text-sm">
+                              ₹{Object.values(record.allowances || {}).reduce((sum, val) => sum + Number(val), 0).toLocaleString()}
+                            </td>
+                            <td className="py-3 px-4 text-sm">
+                              ₹{Number(record.totalDeductions || 0).toLocaleString()}
+                            </td>
+                            <td className="py-3 px-4 text-sm font-medium">₹{Number(record.netSalary || 0).toLocaleString()}</td>
+                            <td className="py-3 px-4">
+                              <span className={`px-3 py-1 rounded-full text-xs font-medium ${getHRPayrollStatusColor(record.status)}`}>
+                                {record.status?.replace('_', ' ') || 'DRAFT'}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4">
+                              <div className="flex space-x-2">
+                                <Button 
+                                  size="sm" 
+                                  variant="outline"
+                                  onClick={() => {
+                                    setSelectedPayrollRecord(record);
+                                    setShowViewModal(true);
+                                  }}
+                                  className="flex items-center space-x-1"
+                                >
+                                  <Eye className="h-3 w-3" />
+                                  <span>View</span>
+                                </Button>
+                                {record.status === 'CALCULATED' && (
+                                  <Button 
+                                    size="sm" 
+                                    variant="outline"
+                                    onClick={() => {
+                                      setSelectedPayrollRecord(record);
+                                      setShowAdjustModal(true);
+                                    }}
+                                    className="flex items-center space-x-1"
+                                  >
+                                    <Edit className="h-3 w-3" />
+                                    <span>Adjust</span>
+                                  </Button>
+                                )}
+                                <Button 
+                                  size="sm" 
+                                  variant="outline"
+                                  onClick={() => generatePayslip(record)}
+                                  className="flex items-center space-x-1"
+                                >
+                                  <FileText className="h-3 w-3" />
+                                  <span>Payslip</span>
+                                </Button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -1167,6 +1503,225 @@ const PayrollManagement = () => {
                 <p className="text-lg font-medium mb-2">More Settings Coming Soon</p>
                 <p className="text-sm">Statutory settings, tax configurations, and compliance features will be available in the next update.</p>
               </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Tax & Compliance Tab */}
+      {selectedTab === 'taxcompliance' && (
+        <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center space-x-2">
+                <Percent className="h-5 w-5" />
+                <span>Tax & Compliance Configuration</span>
+              </CardTitle>
+              <CardDescription>
+                Configure PF, ESI, Professional Tax, and TDS settings for payroll calculations
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {taxConfigLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full"></div>
+                  <span className="ml-3 text-gray-600 dark:text-gray-400">Loading tax configuration...</span>
+                </div>
+              ) : (
+                <form onSubmit={handleTaxConfigSubmit} className="space-y-8">
+                  {/* PF Section */}
+                  <div className="space-y-4">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white border-b border-gray-200 dark:border-gray-700 pb-2">
+                      Provident Fund (PF)
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div key="pf-minimum-salary">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                          PF Applicable Above (₹)
+                        </label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={taxConfigData.pfMinimumSalary}
+                          onChange={(e) => setTaxConfigData({...taxConfigData, pfMinimumSalary: e.target.value})}
+                          placeholder="e.g., 10000"
+                          className={taxConfigErrors.pfMinimumSalary ? 'border-red-500' : ''}
+                        />
+                        {taxConfigErrors.pfMinimumSalary && (
+                          <p className="text-red-500 text-xs mt-1">{taxConfigErrors.pfMinimumSalary}</p>
+                        )}
+                      </div>
+                      <div key="pf-employee-rate">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                          Employee PF Rate (%)
+                        </label>
+                        <Input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.01"
+                          value={taxConfigData.pfEmployeeRate}
+                          onChange={(e) => setTaxConfigData({...taxConfigData, pfEmployeeRate: e.target.value})}
+                          placeholder="e.g., 12"
+                          className={taxConfigErrors.pfEmployeeRate ? 'border-red-500' : ''}
+                        />
+                        {taxConfigErrors.pfEmployeeRate && (
+                          <p className="text-red-500 text-xs mt-1">{taxConfigErrors.pfEmployeeRate}</p>
+                        )}
+                      </div>
+                     
+                    </div>
+                  </div>
+
+                  {/* ESI Section */}
+                  <div className="space-y-4">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white border-b border-gray-200 dark:border-gray-700 pb-2">
+                      Employee State Insurance (ESI)
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div key="esi-minimum-salary">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                          ESI Applicable Up To (₹)
+                        </label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={taxConfigData.esiMinimumSalary}
+                          onChange={(e) => setTaxConfigData({...taxConfigData, esiMinimumSalary: e.target.value})}
+                          placeholder="e.g., 21000"
+                          className={taxConfigErrors.esiMinimumSalary ? 'border-red-500' : ''}
+                        />
+                        {taxConfigErrors.esiMinimumSalary && (
+                          <p className="text-red-500 text-xs mt-1">{taxConfigErrors.esiMinimumSalary}</p>
+                        )}
+                      </div>
+                      <div key="esi-employee-rate">
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                          Employee ESI Rate (%)
+                        </label>
+                        <Input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.01"
+                          value={taxConfigData.esiEmployeeRate}
+                          onChange={(e) => setTaxConfigData({...taxConfigData, esiEmployeeRate: e.target.value})}
+                          placeholder="e.g., 0.75"
+                          className={taxConfigErrors.esiEmployeeRate ? 'border-red-500' : ''}
+                        />
+                        {taxConfigErrors.esiEmployeeRate && (
+                          <p className="text-red-500 text-xs mt-1">{taxConfigErrors.esiEmployeeRate}</p>
+                        )}
+                      </div>
+                     
+                    </div>
+                  </div>
+
+                  {/* Professional Tax Section */}
+                  <div className="space-y-4">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white border-b border-gray-200 dark:border-gray-700 pb-2">
+                      Professional Tax
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                          Professional Tax Amount (₹)
+                        </label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={taxConfigData.professionalTaxAmount}
+                          onChange={(e) => setTaxConfigData({...taxConfigData, professionalTaxAmount: e.target.value})}
+                          placeholder="e.g., 200"
+                          className={taxConfigErrors.professionalTaxAmount ? 'border-red-500' : ''}
+                        />
+                        {taxConfigErrors.professionalTaxAmount && (
+                          <p className="text-red-500 text-xs mt-1">{taxConfigErrors.professionalTaxAmount}</p>
+                        )}
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                          Applicable Above Salary (₹)
+                        </label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={taxConfigData.professionalTaxMinimumSalary}
+                          onChange={(e) => setTaxConfigData({...taxConfigData, professionalTaxMinimumSalary: e.target.value})}
+                          placeholder="e.g., 10000"
+                          className={taxConfigErrors.professionalTaxMinimumSalary ? 'border-red-500' : ''}
+                        />
+                        {taxConfigErrors.professionalTaxMinimumSalary && (
+                          <p className="text-red-500 text-xs mt-1">{taxConfigErrors.professionalTaxMinimumSalary}</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* TDS Section */}
+                  <div className="space-y-4">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white border-b border-gray-200 dark:border-gray-700 pb-2">
+                      Tax Deducted at Source (TDS)
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-1 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                          Annual TDS Exemption Limit (₹)
+                        </label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={taxConfigData.tdsExemptionLimit}
+                          onChange={(e) => setTaxConfigData({...taxConfigData, tdsExemptionLimit: e.target.value})}
+                          placeholder="e.g., 250000"
+                          className={taxConfigErrors.tdsExemptionLimit ? 'border-red-500' : ''}
+                        />
+                        {taxConfigErrors.tdsExemptionLimit && (
+                          <p className="text-red-500 text-xs mt-1">{taxConfigErrors.tdsExemptionLimit}</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Notes Section */}
+                  <div className="space-y-4">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white border-b border-gray-200 dark:border-gray-700 pb-2">
+                      Additional Notes
+                    </h3>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        Configuration Notes
+                      </label>
+                      <textarea
+                        className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-primary focus:border-transparent"
+                        rows="3"
+                        value={taxConfigData.notes}
+                        onChange={(e) => setTaxConfigData({...taxConfigData, notes: e.target.value})}
+                        placeholder="Optional notes about tax configuration, compliance requirements, or special considerations..."
+                      />
+                    </div>
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200 dark:border-gray-700">
+                    <Button
+                      type="submit"
+                      disabled={taxConfigLoading}
+                      className="flex items-center space-x-2"
+                    >
+                      {taxConfigLoading && (
+                        <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></div>
+                      )}
+                      <span>Save Configuration</span>
+                    </Button>
+                  </div>
+                </form>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -1728,6 +2283,310 @@ const PayrollManagement = () => {
                 >
                   {setupLoading && <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>}
                   <span>{selectedBankAccount ? 'Update' : 'Create'}</span>
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Calculate Payroll Modal */}
+      {showCalculateModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-2xl mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold">Calculate Payroll - {payrollMonth}</h3>
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => setShowCalculateModal(false)}
+              >
+                <XCircle className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                <div className="flex items-center space-x-3">
+                  <input 
+                    type="checkbox" 
+                    checked={selectedEmployees.length === employees.length}
+                    onChange={(e) => handleSelectAllEmployees(e.target.checked)}
+                    className="rounded border-gray-300"
+                  />
+                  <span className="font-medium">Select All Employees</span>
+                </div>
+                <span className="text-sm text-gray-500">
+                  {selectedEmployees.length} of {employees.length} selected
+                </span>
+              </div>
+
+              <div className="max-h-64 overflow-y-auto space-y-2">
+                {employees.map(employee => (
+                  <div key={employee.id} className="flex items-center space-x-3 p-3 border rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700">
+                    <input 
+                      type="checkbox" 
+                      checked={selectedEmployees.includes(employee.id)}
+                      onChange={(e) => handleEmployeeSelection(employee.id, e.target.checked)}
+                      className="rounded border-gray-300"
+                    />
+                    <div className="flex-1">
+                      <div className="font-medium">{employee.name}</div>
+                      <div className="text-sm text-gray-500">{employee.department} • ₹{employee.salary?.toLocaleString()}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex justify-end space-x-3 pt-4 border-t">
+                <Button 
+                  variant="outline" 
+                  onClick={() => setShowCalculateModal(false)}
+                >
+                  Cancel
+                </Button>
+                <Button 
+                  onClick={handleCalculatePayroll}
+                  disabled={selectedEmployees.length === 0 || hrPayrollLoading}
+                  className="bg-blue-600 hover:bg-blue-700"
+                >
+                  {hrPayrollLoading ? 'Calculating...' : `Calculate Selected (${selectedEmployees.length})`}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Payroll Details Modal */}
+      {showViewModal && selectedPayrollRecord && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-4xl mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-lg font-semibold">
+                Payroll Details - {selectedPayrollRecord.employee?.name}
+              </h3>
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => {
+                  setShowViewModal(false);
+                  setSelectedPayrollRecord(null);
+                }}
+              >
+                <XCircle className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-6">
+              <div className="space-y-4">
+                <div>
+                  <h4 className="font-medium text-gray-900 dark:text-white mb-3">Basic Information</h4>
+                  <div className="space-y-2">
+                    <div className="flex justify-between">
+                      <span className="text-gray-600 dark:text-gray-400">Employee ID:</span>
+                      <span>{selectedPayrollRecord.employee?.employeeId}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600 dark:text-gray-400">Department:</span>
+                      <span>{selectedPayrollRecord.employee?.department}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600 dark:text-gray-400">Basic Salary:</span>
+                      <span>₹{Number(selectedPayrollRecord.baseSalary || 0).toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600 dark:text-gray-400">Working Days:</span>
+                      <span>{selectedPayrollRecord.workingDays}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600 dark:text-gray-400">Paid Days:</span>
+                      <span>{selectedPayrollRecord.paidDays}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600 dark:text-gray-400">LWP Days:</span>
+                      <span>{selectedPayrollRecord.unpaidDays}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className="font-medium text-gray-900 dark:text-white mb-3">Allowances</h4>
+                  <div className="space-y-2">
+                    {Object.entries(selectedPayrollRecord.allowances || {}).map(([key, value]) => (
+                      <div key={key} className="flex justify-between">
+                        <span className="text-gray-600 dark:text-gray-400 capitalize">
+                          {key.replace(/_/g, ' ')}:
+                        </span>
+                        <span>₹{Number(value).toLocaleString()}</span>
+                      </div>
+                    ))}
+                    <div className="flex justify-between font-medium border-t pt-2">
+                      <span>Total Allowances:</span>
+                      <span>₹{Object.values(selectedPayrollRecord.allowances || {}).reduce((sum, val) => sum + Number(val), 0).toLocaleString()}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <h4 className="font-medium text-gray-900 dark:text-white mb-3">Deductions</h4>
+                  <div className="space-y-2">
+                    {Object.entries(selectedPayrollRecord.deductions || {}).map(([key, value]) => (
+                      <div key={key} className="flex justify-between">
+                        <span className="text-gray-600 dark:text-gray-400 capitalize">
+                          {key.replace(/_/g, ' ')}:
+                        </span>
+                        <span>₹{Number(value).toLocaleString()}</span>
+                      </div>
+                    ))}
+                    {selectedPayrollRecord.lwpDeduction > 0 && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-600 dark:text-gray-400">LWP Deduction:</span>
+                        <span>₹{Number(selectedPayrollRecord.lwpDeduction).toLocaleString()}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between font-medium border-t pt-2">
+                      <span>Total Deductions:</span>
+                      <span>₹{Number(selectedPayrollRecord.totalDeductions || 0).toLocaleString()}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg">
+                  <div className="flex justify-between items-center">
+                    <span className="text-lg font-medium">Net Salary:</span>
+                    <span className="text-2xl font-bold text-green-600">
+                      ₹{Number(selectedPayrollRecord.netSalary || 0).toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className="font-medium text-gray-900 dark:text-white mb-3">Status Information</h4>
+                  <div className="space-y-2">
+                    <div className="flex justify-between">
+                      <span className="text-gray-600 dark:text-gray-400">Status:</span>
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${getHRPayrollStatusColor(selectedPayrollRecord.status)}`}>
+                        {selectedPayrollRecord.status?.replace('_', ' ')}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600 dark:text-gray-400">Calculated At:</span>
+                      <span>{new Date(selectedPayrollRecord.calculatedAt).toLocaleDateString()}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Adjustment Modal */}
+      {showAdjustModal && selectedPayrollRecord && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold">
+                Adjust Payroll - {selectedPayrollRecord.employee?.name}
+              </h3>
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => {
+                  setShowAdjustModal(false);
+                  setSelectedPayrollRecord(null);
+                  setAdjustmentForm({
+                    adjustmentType: 'ALLOWANCE',
+                    adjustmentName: '',
+                    amount: '',
+                    reason: ''
+                  });
+                }}
+              >
+                <XCircle className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <form className="space-y-4" onSubmit={(e) => {
+              e.preventDefault();
+              // Handle adjustment submission
+              console.log('Adjustment form:', adjustmentForm);
+              toast.success('Adjustment functionality coming soon!');
+            }}>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Adjustment Type
+                </label>
+                <select 
+                  value={adjustmentForm.adjustmentType}
+                  onChange={(e) => setAdjustmentForm(prev => ({ ...prev, adjustmentType: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg dark:bg-gray-700 dark:border-gray-600"
+                >
+                  <option value="ALLOWANCE">Additional Allowance</option>
+                  <option value="DEDUCTION">Additional Deduction</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Adjustment Name
+                </label>
+                <input 
+                  type="text"
+                  value={adjustmentForm.adjustmentName}
+                  onChange={(e) => setAdjustmentForm(prev => ({ ...prev, adjustmentName: e.target.value }))}
+                  placeholder="e.g., Special Bonus, Late Fine"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg dark:bg-gray-700 dark:border-gray-600"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Amount (₹)
+                </label>
+                <input 
+                  type="number"
+                  value={adjustmentForm.amount}
+                  onChange={(e) => setAdjustmentForm(prev => ({ ...prev, amount: e.target.value }))}
+                  placeholder="5000"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg dark:bg-gray-700 dark:border-gray-600"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Reason
+                </label>
+                <textarea 
+                  value={adjustmentForm.reason}
+                  onChange={(e) => setAdjustmentForm(prev => ({ ...prev, reason: e.target.value }))}
+                  placeholder="Reason for this adjustment"
+                  rows={3}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg dark:bg-gray-700 dark:border-gray-600"
+                />
+              </div>
+
+              <div className="flex justify-end space-x-3 pt-4 border-t">
+                <Button 
+                  type="button"
+                  variant="outline" 
+                  onClick={() => {
+                    setShowAdjustModal(false);
+                    setSelectedPayrollRecord(null);
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button 
+                  type="submit"
+                  className="bg-blue-600 hover:bg-blue-700"
+                >
+                  Apply Adjustment
                 </Button>
               </div>
             </form>

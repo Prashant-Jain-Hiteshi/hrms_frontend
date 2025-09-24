@@ -4,7 +4,7 @@ import './index.css'
 import App from './App.jsx'
 // Root element
 createRoot(document.getElementById('root')).render(
-  <StrictMode>
+  // <StrictMode> // Disabled to prevent double rendering in development
     <App />
-  </StrictMode>,
+  // </StrictMode>,
 )
