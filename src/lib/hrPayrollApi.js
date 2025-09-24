@@ -18,6 +18,10 @@ export const HRPayrollAPI = {
   adjustPayroll: (recordId, adjustmentData) => 
     api.put(`/payroll/hr/adjust/${recordId}`, adjustmentData),
   
+  // Approve individual payroll record
+  approvePayroll: (recordId, approvalNotes) => 
+    api.put(`/payroll/hr/approve/${recordId}`, { approvalNotes }),
+
   // Bulk approve payroll records
   bulkApprovePayroll: (data) => 
     api.post('/payroll/hr/approve-bulk', data),
@@ -25,4 +29,16 @@ export const HRPayrollAPI = {
   // Get all employees for selection
   getEmployeesForPayroll: () => 
     api.get('/employees'),
+  
+  // Get employees eligible for specific payroll month
+  getEligibleEmployees: (month) => 
+    api.get(`/payroll/hr/eligible-employees/${month}`),
+  
+  // Get dashboard summary for HR overview
+  getDashboardSummary: (month) => 
+    api.get(`/payroll/hr/dashboard-summary/${month}`),
+  
+  // Get department breakdown for salary distribution
+  getDepartmentBreakdown: (month) => 
+    api.get(`/payroll/hr/department-breakdown/${month}`),
 };

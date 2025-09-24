@@ -6,7 +6,7 @@ import {
   DollarSign, Plus, Search, Filter, Calendar, 
   TrendingUp, Users, FileText, Download, Edit, 
   Trash2, Receipt, Eye, Activity, Clock, XCircle,
-  Settings, Building2, CreditCard, Percent
+  Settings, Building2, CreditCard, Percent, CheckCircle
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
 import { useAuth } from '../../contexts/AuthContext';
@@ -95,14 +95,31 @@ const PayrollManagement = () => {
   const [selectedEmployees, setSelectedEmployees] = useState([]);
   const [payrollMonth, setPayrollMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
   const [showCalculateModal, setShowCalculateModal] = useState(false);
+  const [eligibleEmployees, setEligibleEmployees] = useState([]);
+  const [loadingEligibleEmployees, setLoadingEligibleEmployees] = useState(false);
   const [showAdjustModal, setShowAdjustModal] = useState(false);
   const [selectedPayrollRecord, setSelectedPayrollRecord] = useState(null);
+  const [showApprovalConfirm, setShowApprovalConfirm] = useState(false);
+  const [recordToApprove, setRecordToApprove] = useState(null);
+  const [showBulkApprovalConfirm, setShowBulkApprovalConfirm] = useState(false);
   const [adjustmentForm, setAdjustmentForm] = useState({
     adjustmentType: 'ALLOWANCE',
     adjustmentName: '',
     amount: '',
     reason: ''
   });
+
+  // Dashboard data states
+  const [dashboardData, setDashboardData] = useState({
+    totalPayroll: 0,
+    employeesPaid: 0,
+    totalEmployees: 0,
+    avgSalary: 0,
+    pendingReimbursements: 1250, // Mock as requested
+    pendingReimbursementCount: 5 // Mock as requested
+  });
+  const [departmentData, setDepartmentData] = useState([]);
+  const [dashboardLoading, setDashboardLoading] = useState(false);
 
   // Format payroll data for charts
   const payrollData = useMemo(() => {
@@ -143,20 +160,39 @@ const PayrollManagement = () => {
         const employee = employees.find(e => e.id === payroll.employeeId) || {};
         const department = departments.find(d => d.id === employee.departmentId) || {};
         
-        return {
+        // Calculate totalAllowances from allowances JSON object
+        const calculatedTotalAllowances = payroll.allowances && typeof payroll.allowances === 'object' 
+          ? Object.values(payroll.allowances).reduce((sum, val) => sum + Number(val || 0), 0) 
+          : 0;
+
+
+        const mappedRecord = {
           id: payroll.id,
           name: employee.name || 'Unknown',
           position: employee.position || 'N/A',
           department: department.name || 'N/A',
           basicSalary: payroll.basicSalary || 0,
-          allowances: payroll.totalAllowances || 0,
-          deductions: payroll.totalDeductions || 0,
+          allowances: payroll.allowances || {}, // JSON object with breakdown
+          totalAllowances: payroll.totalAllowances || calculatedTotalAllowances, // Use backend value or calculate from JSON
+          deductions: payroll.deductions || {}, // JSON object with breakdown
+          totalDeductions: payroll.totalDeductions || 0, // Total amount for table display
+          lwpDeduction: payroll.lwpDeduction || 0,
           netSalary: payroll.netSalary || 0,
           status: payroll.status?.toLowerCase() || 'pending',
           payPeriod: payroll.payPeriod,
           paymentDate: payroll.paymentDate,
-          paymentMethod: payroll.paymentMethod || 'Bank Transfer'
+          paymentMethod: payroll.paymentMethod || 'Bank Transfer',
+          // Additional fields for detailed view
+          grossSalary: payroll.grossSalary || 0,
+          workingDays: payroll.workingDays || 0,
+          paidDays: payroll.paidDays || 0,
+          employeeId: payroll.employeeId,
+          month: payroll.month,
+          year: payroll.year
         };
+        
+
+        return mappedRecord;
       });
     }
     
@@ -179,8 +215,18 @@ const PayrollManagement = () => {
           position: employee.position || employee.designation || 'Staff',
           department: department.name || 'General',
           basicSalary,
-          allowances,
-          deductions,
+          allowances: {
+            'basic_allowance': Math.floor(allowances * 0.6),
+            'transport_allowance': Math.floor(allowances * 0.4)
+          },
+          totalAllowances: allowances,
+          deductions: {
+            'pf': Math.floor(deductions * 0.5),
+            'esi': Math.floor(deductions * 0.2),
+            'professional_tax': Math.floor(deductions * 0.3)
+          },
+          totalDeductions: deductions,
+          lwpDeduction: 0,
           netSalary,
           status: index % 3 === 0 ? 'pending' : 'processed',
           payPeriod: `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`,
@@ -198,8 +244,18 @@ const PayrollManagement = () => {
         position: 'Software Engineer',
         department: 'Engineering',
         basicSalary: 8000,
-        allowances: 1200,
-        deductions: 1800,
+        allowances: {
+          'basic_allowance': 800,
+          'transport_allowance': 400
+        },
+        totalAllowances: 1200,
+        deductions: {
+          'pf': 900,
+          'esi': 360,
+          'professional_tax': 540
+        },
+        totalDeductions: 1800,
+        lwpDeduction: 0,
         netSalary: 7400,
         status: 'processed',
         payPeriod: '2024-02',
@@ -212,8 +268,18 @@ const PayrollManagement = () => {
         position: 'Product Manager',
         department: 'Product',
         basicSalary: 9500,
-        allowances: 1500,
-        deductions: 2100,
+        allowances: {
+          'basic_allowance': 950,
+          'transport_allowance': 550
+        },
+        totalAllowances: 1500,
+        deductions: {
+          'pf': 1050,
+          'esi': 420,
+          'professional_tax': 630
+        },
+        totalDeductions: 2100,
+        lwpDeduction: 0,
         netSalary: 8900,
         status: 'processed',
         payPeriod: '2024-02',
@@ -226,8 +292,18 @@ const PayrollManagement = () => {
         position: 'Designer',
         department: 'Design',
         basicSalary: 7000,
-        allowances: 1000,
-        deductions: 1600,
+        allowances: {
+          'basic_allowance': 700,
+          'transport_allowance': 300
+        },
+        totalAllowances: 1000,
+        deductions: {
+          'pf': 800,
+          'esi': 320,
+          'professional_tax': 480
+        },
+        totalDeductions: 1600,
+        lwpDeduction: 0,
         netSalary: 6400,
         status: 'pending',
         payPeriod: '2024-02',
@@ -324,31 +400,68 @@ const PayrollManagement = () => {
     }
   }, [selectedTab]);
 
-  // Load tax config data when tax compliance tab is selected
+  // Load HR payroll data when component mounts or month changes
   useEffect(() => {
-    if (selectedTab === 'taxcompliance') {
-      loadTaxConfigData();
-    }
-  }, [selectedTab]);
-
-  // Load HR payroll data when payroll tab is selected
-  useEffect(() => {
-    if (selectedTab === 'payroll') {
+    if (user?.role === 'hr' || user?.role === 'admin' || user?.role === 'finance') {
       loadHRPayrollData();
     }
-  }, [selectedTab, payrollMonth]);
+  }, [payrollMonth, user]);
 
-  // HR Payroll Functions
-  const loadHRPayrollData = async () => {
-    setHrPayrollLoading(true);
-    try {
-      const [recordsRes, summaryRes] = await Promise.all([
-        HRPayrollAPI.getPayrollRecords(payrollMonth),
-        HRPayrollAPI.getPayrollSummary(payrollMonth)
-      ]);
+  // Refetch eligible employees when payroll month changes and modal is open
+  useEffect(() => {
+    if (showCalculateModal && payrollMonth) {
+      fetchEligibleEmployees(payrollMonth);
+    }
+  }, [payrollMonth, showCalculateModal]);
+
+  // Load dashboard data when component mounts or month changes
+  useEffect(() => {
+    if (user?.role === 'hr' || user?.role === 'admin' || user?.role === 'finance') {
+      loadDashboardData();
+    }
+  }, [payrollMonth, user]);
+
+// Dashboard Functions
+const loadDashboardData = async () => {
+  setDashboardLoading(true);
+  try {
+    console.log('🔍 Loading dashboard data for month:', payrollMonth);
+    
+    const [summaryRes, deptRes] = await Promise.all([
+      HRPayrollAPI.getDashboardSummary(payrollMonth),
+      HRPayrollAPI.getDepartmentBreakdown(payrollMonth)
+    ]);
+
+    console.log('✅ Dashboard data loaded:', {
+      summary: summaryRes.data,
+      departments: deptRes.data
+    });
+
+    setDashboardData({
+      ...summaryRes.data,
+      pendingReimbursements: 1250, // Keep mock as requested
+      pendingReimbursementCount: 5 // Keep mock as requested
+    });
+    setDepartmentData(deptRes.data.departments || []);
+  } catch (error) {
+    console.error('❌ Error loading dashboard data:', error);
+    toast.error('Failed to load dashboard data');
+  } finally {
+    setDashboardLoading(false);
+  }
+};
+
+// HR Payroll Functions
+const loadHRPayrollData = async () => {
+  setHrPayrollLoading(true);
+  try {
+    const [recordsRes, summaryRes] = await Promise.all([
+      HRPayrollAPI.getPayrollRecords(payrollMonth),
+      HRPayrollAPI.getPayrollSummary(payrollMonth)
+    ]);
       
-      setHrPayrollRecords(recordsRes.data || []);
-      setHrPayrollSummary(summaryRes.data || null);
+    setHrPayrollRecords(recordsRes.data || []);
+    setHrPayrollSummary(summaryRes.data || null);
     } catch (error) {
       console.error('Error loading HR payroll data:', error);
       toast.error('Failed to load payroll data');
@@ -376,6 +489,7 @@ const PayrollManagement = () => {
           toast.warning(`${response.data.failed} employees failed to process`);
         }
         loadHRPayrollData(); // Reload data
+        loadDashboardData(); // Refresh dashboard data
         setSelectedEmployees([]);
         setShowCalculateModal(false);
       } else {
@@ -389,28 +503,52 @@ const PayrollManagement = () => {
     }
   };
 
-  const handleBulkApprove = async () => {
-    const calculatedRecords = hrPayrollRecords.filter(record => record.status === 'CALCULATED');
+  const handleBulkApprove = () => {
+    // Filter only calculated records from selected employees
+    const selectedCalculatedRecords = hrPayrollRecords.filter(record => 
+      selectedEmployees.includes(record.id) && record.status === 'CALCULATED'
+    );
     
-    if (calculatedRecords.length === 0) {
-      toast.error('No calculated records to approve');
+    if (selectedCalculatedRecords.length === 0) {
+      toast.error('No calculated records selected for approval');
       return;
     }
 
+    // Show confirmation dialog
+    setShowBulkApprovalConfirm(true);
+  };
+
+  // Confirm and execute bulk approval
+  const confirmBulkApproval = async () => {
     setHrPayrollLoading(true);
+    
+    // Filter only calculated records from selected employees
+    const selectedCalculatedRecords = hrPayrollRecords.filter(record => 
+      selectedEmployees.includes(record.id) && record.status === 'CALCULATED'
+    );
+
     try {
       const response = await HRPayrollAPI.bulkApprovePayroll({
-        payrollRecordIds: calculatedRecords.map(record => record.id),
-        approvalNotes: 'Bulk approved by HR'
+        payrollRecordIds: selectedCalculatedRecords.map(record => record.id),
+        approvalNotes: `Bulk approved ${selectedCalculatedRecords.length} records by HR`
       });
 
-      toast.success(`Approved ${calculatedRecords.length} payroll records`);
-      loadHRPayrollData(); // Reload data
+      console.log('✅ Bulk approval response:', response.data);
+      
+      if (response.data.summary.successful > 0) {
+        toast.success(`Approved ${response.data.summary.successful} payroll records`);
+        loadHRPayrollData(); // Reload data
+        loadDashboardData(); // Refresh dashboard data
+        setSelectedEmployees([]); // Clear selections
+      } else {
+        toast.error('Failed to approve payroll records');
+      }
     } catch (error) {
       console.error('Error approving payroll:', error);
       toast.error('Failed to approve payroll records');
     } finally {
       setHrPayrollLoading(false);
+      setShowBulkApprovalConfirm(false);
     }
   };
 
@@ -424,7 +562,7 @@ const PayrollManagement = () => {
 
   const handleSelectAllEmployees = (isSelected) => {
     if (isSelected) {
-      setSelectedEmployees(hrPayrollRecords.map(record => record.id));
+      setSelectedEmployees(eligibleEmployees.map(emp => emp.id));
     } else {
       setSelectedEmployees([]);
     }
@@ -771,6 +909,125 @@ const PayrollManagement = () => {
     }
   };
 
+  // Fetch eligible employees for payroll calculation
+  const fetchEligibleEmployees = async (month) => {
+    setLoadingEligibleEmployees(true);
+    try {
+      console.log('🔍 Fetching eligible employees for month:', month);
+      const response = await HRPayrollAPI.getEligibleEmployees(month);
+      
+      console.log('✅ Eligible employees response:', response.data);
+      setEligibleEmployees(response.data || []);
+      
+      // Clear previous selections
+      setSelectedEmployees([]);
+      
+    } catch (error) {
+      console.error('❌ Error fetching eligible employees:', error);
+      toast.error('Failed to load eligible employees');
+      setEligibleEmployees([]);
+    } finally {
+      setLoadingEligibleEmployees(false);
+    }
+  };
+
+  // Handle opening calculate modal
+  const handleOpenCalculateModal = () => {
+    setShowCalculateModal(true);
+    fetchEligibleEmployees(payrollMonth);
+  };
+
+  // Handle individual payroll approval confirmation
+  const handleIndividualApprove = (record) => {
+    if (!record || record.status !== 'CALCULATED') {
+      toast.error('Only calculated records can be approved');
+      return;
+    }
+    setRecordToApprove(record);
+    setShowApprovalConfirm(true);
+  };
+
+  // Confirm and execute individual approval
+  const confirmIndividualApproval = async () => {
+    if (!recordToApprove) return;
+
+    try {
+      console.log('🔍 Approving individual record:', recordToApprove);
+      
+      const response = await HRPayrollAPI.approvePayroll(
+        recordToApprove.id, 
+        `Individual approval for ${recordToApprove.employee?.name || 'employee'}`
+      );
+
+      console.log('✅ Individual approval response:', response.data);
+      
+      if (response.data.summary.successful > 0) {
+        toast.success(`Approved payroll for ${recordToApprove.employee?.name || 'employee'}`);
+        loadHRPayrollData(); // Reload data to show updated status
+        loadDashboardData(); // Refresh dashboard data
+      } else {
+        toast.error('Failed to approve payroll record');
+      }
+    } catch (error) {
+      console.error('❌ Error approving individual payroll:', error);
+      toast.error('Failed to approve payroll record');
+    } finally {
+      setShowApprovalConfirm(false);
+      setRecordToApprove(null);
+    }
+  };
+
+  // Handle adjustment submission
+  const handleAdjustmentSubmit = async (e) => {
+    e.preventDefault();
+    
+    // Validate form
+    if (!adjustmentForm.adjustmentName.trim()) {
+      toast.error('Please enter adjustment name');
+      return;
+    }
+    
+    if (!adjustmentForm.amount || parseFloat(adjustmentForm.amount) <= 0) {
+      toast.error('Please enter a valid amount');
+      return;
+    }
+
+    try {
+      console.log('🔧 Submitting adjustment:', {
+        recordId: selectedPayrollRecord?.id,
+        adjustmentData: adjustmentForm
+      });
+
+      const response = await HRPayrollAPI.adjustPayroll(selectedPayrollRecord.id, {
+        adjustmentType: adjustmentForm.adjustmentType,
+        adjustmentName: adjustmentForm.adjustmentName,
+        amount: parseFloat(adjustmentForm.amount),
+        reason: adjustmentForm.reason || undefined
+      });
+
+      console.log('✅ Adjustment response:', response);
+      
+      toast.success(`Adjustment applied successfully! Net salary updated from ₹${response.data.oldNetSalary} to ₹${response.data.newNetSalary}`);
+      
+      // Reset form and close modal
+      setAdjustmentForm({
+        adjustmentType: 'ALLOWANCE',
+        adjustmentName: '',
+        amount: '',
+        reason: ''
+      });
+      setSelectedPayrollRecord(null);
+      setShowAdjustModal(false);
+      
+      // Refresh payroll data if available
+      // You might want to call a refresh function here
+      
+    } catch (error) {
+      console.error('❌ Adjustment failed:', error);
+      toast.error(error.response?.data?.message || 'Failed to apply adjustment');
+    }
+  };
+
   const getStatusColor = (status) => {
     switch (status) {
       case 'processed':
@@ -811,11 +1068,11 @@ const PayrollManagement = () => {
       payslip.name,
       selectedMonth,
       payslip.basicSalary,
-      payslip.allowances,
-      0,
-      payslip.basicSalary + payslip.allowances,
-      0,
-      payslip.deductions,
+      payslip.totalAllowances,
+      0, // overtime
+      payslip.basicSalary + payslip.totalAllowances,
+      0, // tax deduction
+      payslip.totalDeductions,
       payslip.netSalary,
       payslip.status
     ]);
@@ -841,11 +1098,11 @@ const PayrollManagement = () => {
       ['Employee ID', payslip.id],
       ['Month', selectedMonth],
       ['Basic Salary', payslip.basicSalary],
-      ['Allowances', payslip.allowances],
+      ['Allowances', payslip.totalAllowances],
       ['Overtime', 0],
-      ['Gross Salary', payslip.basicSalary + payslip.allowances],
+      ['Gross Salary', payslip.basicSalary + payslip.totalAllowances],
       ['Tax Deduction', 0],
-      ['Other Deductions', payslip.deductions],
+      ['Other Deductions', payslip.totalDeductions],
       ['Net Salary', payslip.netSalary],
       ['Status', payslip.status]
     ];
@@ -921,7 +1178,9 @@ const PayrollManagement = () => {
                 <DollarSign className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-green-600">$420,000</div>
+                <div className="text-2xl font-bold text-green-600">
+                  {dashboardLoading ? '...' : `₹${dashboardData.totalPayroll.toLocaleString()}`}
+                </div>
                 <p className="text-xs text-muted-foreground">This month</p>
               </CardContent>
             </Card>
@@ -932,8 +1191,12 @@ const PayrollManagement = () => {
                 <Users className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-blue-600">48</div>
-                <p className="text-xs text-muted-foreground">Out of 50 employees</p>
+                <div className="text-2xl font-bold text-blue-600">
+                  {dashboardLoading ? '...' : dashboardData.employeesPaid}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Out of {dashboardLoading ? '...' : dashboardData.totalEmployees} employees
+                </p>
               </CardContent>
             </Card>
 
@@ -943,8 +1206,12 @@ const PayrollManagement = () => {
                 <Receipt className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-yellow-600">$1,250</div>
-                <p className="text-xs text-muted-foreground">5 requests pending</p>
+                <div className="text-2xl font-bold text-yellow-600">
+                  ₹{dashboardData.pendingReimbursements.toLocaleString()}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {dashboardData.pendingReimbursementCount} requests pending
+                </p>
               </CardContent>
             </Card>
 
@@ -954,8 +1221,10 @@ const PayrollManagement = () => {
                 <TrendingUp className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-purple-600">$8,750</div>
-                <p className="text-xs text-muted-foreground">+5% from last month</p>
+                <div className="text-2xl font-bold text-purple-600">
+                  {dashboardLoading ? '...' : `₹${dashboardData.avgSalary.toLocaleString()}`}
+                </div>
+                <p className="text-xs text-muted-foreground">Average per employee</p>
               </CardContent>
             </Card>
           </div>
@@ -974,23 +1243,24 @@ const PayrollManagement = () => {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {[
-                    { dept: 'Engineering', amount: 180000, percentage: 43 },
-                    { dept: 'Sales', amount: 120000, percentage: 29 },
-                    { dept: 'Marketing', amount: 80000, percentage: 19 },
-                    { dept: 'HR', amount: 40000, percentage: 9 }
-                  ].map((item) => (
-                    <div key={item.dept} className="flex items-center justify-between">
-                      <div className="flex items-center space-x-3">
-                        <div className="w-3 h-3 bg-primary rounded-full"></div>
-                        <span className="font-medium">{item.dept}</span>
+                  {dashboardLoading ? (
+                    <div className="text-center py-4">Loading department data...</div>
+                  ) : departmentData.length > 0 ? (
+                    departmentData.map((item) => (
+                      <div key={item.department} className="flex items-center justify-between">
+                        <div className="flex items-center space-x-3">
+                          <div className="w-3 h-3 bg-primary rounded-full"></div>
+                          <span className="font-medium">{item.department}</span>
+                        </div>
+                        <div className="text-right">
+                          <div className="font-medium">₹{item.amount.toLocaleString()}</div>
+                          <div className="text-sm text-gray-500">{item.percentage}%</div>
+                        </div>
                       </div>
-                      <div className="text-right">
-                        <div className="font-medium">${item.amount.toLocaleString()}</div>
-                        <div className="text-sm text-gray-500">{item.percentage}%</div>
-                      </div>
-                    </div>
-                  ))}
+                    ))
+                  ) : (
+                    <div className="text-center py-4 text-gray-500">No department data available</div>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -1066,7 +1336,7 @@ const PayrollManagement = () => {
                 
                 <div className="flex items-center space-x-3">
                   <Button 
-                    onClick={() => setShowCalculateModal(true)}
+                    onClick={handleOpenCalculateModal}
                     className="bg-blue-600 hover:bg-blue-700 text-white flex items-center space-x-2"
                     disabled={hrPayrollLoading}
                   >
@@ -1079,7 +1349,7 @@ const PayrollManagement = () => {
                     disabled={selectedEmployees.length === 0 || hrPayrollLoading}
                     className="flex items-center space-x-2"
                   >
-                    <span>Approve Selected ({selectedEmployees.length})</span>
+                    <span>Approve bulk ({selectedEmployees.length})</span>
                   </Button>
                 </div>
               </div>
@@ -1174,12 +1444,8 @@ const PayrollManagement = () => {
                             </td>
                             <td className="py-3 px-4 text-sm">{record.employee?.department || 'N/A'}</td>
                             <td className="py-3 px-4 text-sm">₹{Number(record.baseSalary || 0).toLocaleString()}</td>
-                            <td className="py-3 px-4 text-sm">
-                              ₹{Object.values(record.allowances || {}).reduce((sum, val) => sum + Number(val), 0).toLocaleString()}
-                            </td>
-                            <td className="py-3 px-4 text-sm">
-                              ₹{Number(record.totalDeductions || 0).toLocaleString()}
-                            </td>
+                            <td className="py-3 px-4">₹{record.totalAllowances?.toLocaleString() || '0'}</td>
+                            <td className="py-3 px-4">₹{record.totalDeductions?.toLocaleString()}</td>
                             <td className="py-3 px-4 text-sm font-medium">₹{Number(record.netSalary || 0).toLocaleString()}</td>
                             <td className="py-3 px-4">
                               <span className={`px-3 py-1 rounded-full text-xs font-medium ${getHRPayrollStatusColor(record.status)}`}>
@@ -1201,18 +1467,28 @@ const PayrollManagement = () => {
                                   <span>View</span>
                                 </Button>
                                 {record.status === 'CALCULATED' && (
-                                  <Button 
-                                    size="sm" 
-                                    variant="outline"
-                                    onClick={() => {
-                                      setSelectedPayrollRecord(record);
-                                      setShowAdjustModal(true);
-                                    }}
-                                    className="flex items-center space-x-1"
-                                  >
-                                    <Edit className="h-3 w-3" />
-                                    <span>Adjust</span>
-                                  </Button>
+                                  <>
+                                    <Button 
+                                      size="sm" 
+                                      variant="outline"
+                                      onClick={() => {
+                                        setSelectedPayrollRecord(record);
+                                        setShowAdjustModal(true);
+                                      }}
+                                      className="flex items-center space-x-1"
+                                    >
+                                      <Edit className="h-3 w-3" />
+                                      <span>Adjust</span>
+                                    </Button>
+                                    <Button 
+                                      size="sm" 
+                                      onClick={() => handleIndividualApprove(record)}
+                                      className="bg-green-600 hover:bg-green-700 text-white flex items-center space-x-1"
+                                    >
+                                      <CheckCircle className="h-3 w-3" />
+                                      <span>Approve</span>
+                                    </Button>
+                                  </>
                                 )}
                                 <Button 
                                   size="sm" 
@@ -1864,7 +2140,7 @@ const PayrollManagement = () => {
                 </div>
                 <div>
                   <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Allowances</label>
-                  <p className="text-gray-900 dark:text-white">${selectedPayroll.allowances?.toLocaleString()}</p>
+                  <p className="text-gray-900 dark:text-white">${selectedPayroll.totalAllowances?.toLocaleString()}</p>
                 </div>
               </div>
               
@@ -1961,11 +2237,11 @@ const PayrollManagement = () => {
                   </div>
                   <div>
                     <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Allowances</label>
-                    <p className="text-gray-900 dark:text-white font-medium text-green-600">${selectedEmployee.allowances?.toLocaleString()}</p>
+                    <p className="text-gray-900 dark:text-white font-medium text-green-600">${selectedEmployee.totalAllowances?.toLocaleString()}</p>
                   </div>
                   <div>
                     <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Deductions</label>
-                    <p className="text-gray-900 dark:text-white font-medium text-red-600">-${selectedEmployee.deductions?.toLocaleString()}</p>
+                    <p className="text-gray-900 dark:text-white font-medium text-red-600">-${selectedEmployee.totalDeductions?.toLocaleString()}</p>
                   </div>
                   <div>
                     <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Net Salary</label>
@@ -2310,19 +2586,29 @@ const PayrollManagement = () => {
                 <div className="flex items-center space-x-3">
                   <input 
                     type="checkbox" 
-                    checked={selectedEmployees.length === employees.length}
+                    checked={selectedEmployees.length === eligibleEmployees.length && eligibleEmployees.length > 0}
                     onChange={(e) => handleSelectAllEmployees(e.target.checked)}
                     className="rounded border-gray-300"
+                    disabled={loadingEligibleEmployees || eligibleEmployees.length === 0}
                   />
                   <span className="font-medium">Select All Employees</span>
                 </div>
                 <span className="text-sm text-gray-500">
-                  {selectedEmployees.length} of {employees.length} selected
+                  {selectedEmployees.length} of {eligibleEmployees.length} selected
                 </span>
               </div>
 
               <div className="max-h-64 overflow-y-auto space-y-2">
-                {employees.map(employee => (
+                {loadingEligibleEmployees ? (
+                  <div className="flex items-center justify-center py-8">
+                    <div className="text-gray-500">Loading eligible employees...</div>
+                  </div>
+                ) : eligibleEmployees.length === 0 ? (
+                  <div className="flex items-center justify-center py-8">
+                    <div className="text-gray-500">No eligible employees found for {payrollMonth}</div>
+                  </div>
+                ) : (
+                  eligibleEmployees.map(employee => (
                   <div key={employee.id} className="flex items-center space-x-3 p-3 border rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700">
                     <input 
                       type="checkbox" 
@@ -2335,7 +2621,8 @@ const PayrollManagement = () => {
                       <div className="text-sm text-gray-500">{employee.department} • ₹{employee.salary?.toLocaleString()}</div>
                     </div>
                   </div>
-                ))}
+                  ))
+                )}
               </div>
 
               <div className="flex justify-end space-x-3 pt-4 border-t">
@@ -2413,18 +2700,26 @@ const PayrollManagement = () => {
                 <div>
                   <h4 className="font-medium text-gray-900 dark:text-white mb-3">Allowances</h4>
                   <div className="space-y-2">
-                    {Object.entries(selectedPayrollRecord.allowances || {}).map(([key, value]) => (
-                      <div key={key} className="flex justify-between">
-                        <span className="text-gray-600 dark:text-gray-400 capitalize">
-                          {key.replace(/_/g, ' ')}:
-                        </span>
-                        <span>₹{Number(value).toLocaleString()}</span>
+                    {Object.entries(selectedPayrollRecord.allowances || {}).length > 0 ? (
+                      <>
+                        {Object.entries(selectedPayrollRecord.allowances || {}).map(([key, value]) => (
+                          <div key={key} className="flex justify-between">
+                            <span className="text-gray-600 dark:text-gray-400 capitalize">
+                              {key.replace(/_/g, ' ')}:
+                            </span>
+                            <span className="text-green-600 font-medium">₹{Number(value).toLocaleString()}</span>
+                          </div>
+                        ))}
+                        <div className="flex justify-between font-medium border-t pt-2">
+                          <span>Total Allowances:</span>
+                          <span className="text-green-600">₹{Object.values(selectedPayrollRecord.allowances || {}).reduce((sum, val) => sum + Number(val), 0).toLocaleString()}</span>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="text-gray-500 italic text-center py-2">
+                        No allowances configured
                       </div>
-                    ))}
-                    <div className="flex justify-between font-medium border-t pt-2">
-                      <span>Total Allowances:</span>
-                      <span>₹{Object.values(selectedPayrollRecord.allowances || {}).reduce((sum, val) => sum + Number(val), 0).toLocaleString()}</span>
-                    </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -2433,23 +2728,58 @@ const PayrollManagement = () => {
                 <div>
                   <h4 className="font-medium text-gray-900 dark:text-white mb-3">Deductions</h4>
                   <div className="space-y-2">
-                    {Object.entries(selectedPayrollRecord.deductions || {}).map(([key, value]) => (
-                      <div key={key} className="flex justify-between">
-                        <span className="text-gray-600 dark:text-gray-400 capitalize">
-                          {key.replace(/_/g, ' ')}:
-                        </span>
-                        <span>₹{Number(value).toLocaleString()}</span>
-                      </div>
-                    ))}
-                    {selectedPayrollRecord.lwpDeduction > 0 && (
-                      <div className="flex justify-between">
-                        <span className="text-gray-600 dark:text-gray-400">LWP Deduction:</span>
-                        <span>₹{Number(selectedPayrollRecord.lwpDeduction).toLocaleString()}</span>
+                    {Object.entries(selectedPayrollRecord.deductions || {}).length > 0 || selectedPayrollRecord.lwpDeduction > 0 ? (
+                      <>
+                        {Object.entries(selectedPayrollRecord.deductions || {}).map(([key, value]) => (
+                          <div key={key} className="flex justify-between">
+                            <span className="text-gray-600 dark:text-gray-400 capitalize">
+                              {key.replace(/_/g, ' ')}:
+                            </span>
+                            <span className="text-red-600 font-medium">₹{Number(value).toLocaleString()}</span>
+                          </div>
+                        ))}
+                        {selectedPayrollRecord.lwpDeduction > 0 && (
+                          <div className="flex justify-between">
+                            <span className="text-gray-600 dark:text-gray-400">LWP Deduction:</span>
+                            <span className="text-red-600 font-medium">₹{Number(selectedPayrollRecord.lwpDeduction).toLocaleString()}</span>
+                          </div>
+                        )}
+                        <div className="flex justify-between font-medium border-t pt-2">
+                          <span>Total Deductions:</span>
+                          <span className="text-red-600">₹{Number(selectedPayrollRecord.totalDeductions || 0).toLocaleString()}</span>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="text-gray-500 italic text-center py-2">
+                        No deductions applied
                       </div>
                     )}
-                    <div className="flex justify-between font-medium border-t pt-2">
-                      <span>Total Deductions:</span>
+                  </div>
+                </div>
+
+                {/* Salary Calculation Summary */}
+                <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg">
+                  <h4 className="font-medium text-gray-900 dark:text-white mb-3">Salary Calculation</h4>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span>Basic Salary:</span>
+                      <span>₹{Number(selectedPayrollRecord.baseSalary || 0).toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between text-green-600">
+                      <span>+ Total Allowances:</span>
+                      <span>₹{Object.values(selectedPayrollRecord.allowances || {}).reduce((sum, val) => sum + Number(val), 0).toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between text-gray-600">
+                      <span>= Gross Salary:</span>
+                      <span>₹{(Number(selectedPayrollRecord.baseSalary || 0) + Object.values(selectedPayrollRecord.allowances || {}).reduce((sum, val) => sum + Number(val), 0)).toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between text-red-600">
+                      <span>- Total Deductions:</span>
                       <span>₹{Number(selectedPayrollRecord.totalDeductions || 0).toLocaleString()}</span>
+                    </div>
+                    <div className="border-t pt-2 flex justify-between font-medium text-lg">
+                      <span>= Net Salary:</span>
+                      <span className="text-green-600">₹{Number(selectedPayrollRecord.netSalary || 0).toLocaleString()}</span>
                     </div>
                   </div>
                 </div>
@@ -2510,12 +2840,7 @@ const PayrollManagement = () => {
               </Button>
             </div>
 
-            <form className="space-y-4" onSubmit={(e) => {
-              e.preventDefault();
-              // Handle adjustment submission
-              console.log('Adjustment form:', adjustmentForm);
-              toast.success('Adjustment functionality coming soon!');
-            }}>
+            <form className="space-y-4" onSubmit={handleAdjustmentSubmit}>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Adjustment Type
@@ -2590,6 +2915,166 @@ const PayrollManagement = () => {
                 </Button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Individual Approval Confirmation Modal */}
+      {showApprovalConfirm && recordToApprove && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold">Confirm Payroll Approval</h3>
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => {
+                  setShowApprovalConfirm(false);
+                  setRecordToApprove(null);
+                }}
+              >
+                <XCircle className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                <div className="flex items-center space-x-3">
+                  <CheckCircle className="h-6 w-6 text-blue-600" />
+                  <div>
+                    <div className="font-medium text-blue-900 dark:text-blue-100">
+                      Approve Payroll Record
+                    </div>
+                    <div className="text-sm text-blue-700 dark:text-blue-300">
+                      This action will approve the payroll for this employee
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="border rounded-lg p-3">
+                <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">Employee Details:</div>
+                <div className="font-medium">{recordToApprove.employee?.name || 'Unknown'}</div>
+                <div className="text-sm text-gray-500">{recordToApprove.employee?.department || 'N/A'}</div>
+                <div className="text-sm text-gray-500 mt-1">
+                  Net Salary: ₹{Number(recordToApprove.netSalary || 0).toLocaleString()}
+                </div>
+              </div>
+
+              <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3">
+                <div className="text-sm text-yellow-800 dark:text-yellow-200">
+                  <strong>Note:</strong> Once approved, this payroll record will move to HR_APPROVED status and cannot be modified without admin intervention.
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-3 pt-4 border-t mt-4">
+              <Button 
+                variant="outline" 
+                onClick={() => {
+                  setShowApprovalConfirm(false);
+                  setRecordToApprove(null);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button 
+                onClick={confirmIndividualApproval}
+                className="bg-green-600 hover:bg-green-700 text-white"
+              >
+                <CheckCircle className="h-4 w-4 mr-2" />
+                Approve Payroll
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Approval Confirmation Modal */}
+      {showBulkApprovalConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-lg mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold">Confirm Bulk Payroll Approval</h3>
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => setShowBulkApprovalConfirm(false)}
+              >
+                <XCircle className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                <div className="flex items-center space-x-3">
+                  <CheckCircle className="h-6 w-6 text-blue-600" />
+                  <div>
+                    <div className="font-medium text-blue-900 dark:text-blue-100">
+                      Approve Multiple Payroll Records
+                    </div>
+                    <div className="text-sm text-blue-700 dark:text-blue-300">
+                      This action will approve payroll for selected employees
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="border rounded-lg p-3">
+                <div className="text-sm text-gray-600 dark:text-gray-400 mb-3">Selected Employees for Approval:</div>
+                <div className="max-h-32 overflow-y-auto space-y-2">
+                  {hrPayrollRecords
+                    .filter(record => selectedEmployees.includes(record.id) && record.status === 'CALCULATED')
+                    .map((record, index) => (
+                      <div key={record.id} className="flex justify-between items-center py-1">
+                        <div>
+                          <div className="font-medium text-sm">{record.employee?.name || 'Unknown'}</div>
+                          <div className="text-xs text-gray-500">{record.employee?.department || 'N/A'}</div>
+                        </div>
+                        <div className="text-sm font-medium">
+                          ₹{Number(record.netSalary || 0).toLocaleString()}
+                        </div>
+                      </div>
+                    ))}
+                </div>
+                <div className="border-t pt-2 mt-2">
+                  <div className="flex justify-between items-center font-medium">
+                    <span>Total Records:</span>
+                    <span>{hrPayrollRecords.filter(record => selectedEmployees.includes(record.id) && record.status === 'CALCULATED').length}</span>
+                  </div>
+                  <div className="flex justify-between items-center font-medium text-green-600">
+                    <span>Total Amount:</span>
+                    <span>₹{hrPayrollRecords
+                      .filter(record => selectedEmployees.includes(record.id) && record.status === 'CALCULATED')
+                      .reduce((sum, record) => sum + Number(record.netSalary || 0), 0)
+                      .toLocaleString()}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3">
+                <div className="text-sm text-yellow-800 dark:text-yellow-200">
+                  <strong>Note:</strong> Once approved, these payroll records will move to HR_APPROVED status and cannot be modified without admin intervention.
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-3 pt-4 border-t mt-4">
+              <Button 
+                variant="outline" 
+                onClick={() => setShowBulkApprovalConfirm(false)}
+              >
+                Cancel
+              </Button>
+              <Button 
+                onClick={confirmBulkApproval}
+                className="bg-green-600 hover:bg-green-700 text-white"
+                disabled={hrPayrollLoading}
+              >
+                <CheckCircle className="h-4 w-4 mr-2" />
+                {hrPayrollLoading ? 'Approving...' : 'Approve All Selected'}
+              </Button>
+            </div>
           </div>
         </div>
       )}
