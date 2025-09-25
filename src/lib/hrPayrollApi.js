@@ -41,4 +41,30 @@ export const HRPayrollAPI = {
   // Get department breakdown for salary distribution
   getDepartmentBreakdown: (month) => 
     api.get(`/payroll/hr/department-breakdown/${month}`),
+
+  // Finance Approval APIs
+  getPendingFinanceApprovals: (month) => 
+    api.get(`/payroll/finance/pending-approvals/${month}`),
+  
+  financeApprovePayroll: (recordId, approvalNotes) => 
+    api.put(`/payroll/finance/approve/${recordId}`, { approvalNotes }),
+  
+  financeBulkApprovePayroll: (recordIds, approvalNotes) => 
+    api.post('/payroll/finance/approve-bulk', { recordIds, approvalNotes }),
+
+  // Bank Transfer APIs
+  getBankTransferData: (month) => 
+    api.get(`/payroll/finance/bank-transfers/${month}`),
+  
+  initiateBankTransfer: (bankDetailIds) => 
+    api.post('/payroll/finance/initiate-bank-transfer', { bankDetailIds }),
+  
+  getBankTransferSummary: (month) => 
+    api.get(`/payroll/finance/bank-transfer-summary/${month}`),
+  
+  getBankTransferReceipt: (bankDetailId) => 
+    api.get(`/payroll/finance/bank-transfer-receipt/${bankDetailId}`),
+  
+  generateBankTransferReport: (month, status = 'ALL') => 
+    api.get(`/payroll/finance/bank-transfer-report?month=${month}&status=${status}`),
 };

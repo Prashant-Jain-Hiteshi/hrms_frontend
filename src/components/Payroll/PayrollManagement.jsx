@@ -6,7 +6,7 @@ import {
   DollarSign, Plus, Search, Filter, Calendar, 
   TrendingUp, Users, FileText, Download, Edit, 
   Trash2, Receipt, Eye, Activity, Clock, XCircle,
-  Settings, Building2, CreditCard, Percent, CheckCircle
+  Settings, Building2, CreditCard, Percent, CheckCircle, User
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
 import { useAuth } from '../../contexts/AuthContext';
@@ -16,6 +16,7 @@ import { PayrollSetupAPI } from '../../lib/payrollSetupApi';
 import { HRPayrollAPI } from '../../lib/hrPayrollApi';
 import { toast } from 'react-toastify';
 import CompanyPayrollInfo from './CompanyPayrollInfo';
+import * as XLSX from 'xlsx';
 
 const PayrollManagement = () => {
   const { user } = useAuth();
@@ -120,6 +121,30 @@ const PayrollManagement = () => {
   });
   const [departmentData, setDepartmentData] = useState([]);
   const [dashboardLoading, setDashboardLoading] = useState(false);
+
+  // Bank Transfer States
+  const [bankTransferData, setBankTransferData] = useState([]);
+  const [bankTransferSummary, setBankTransferSummary] = useState({
+    totalEmployees: 0,
+    totalAmount: 0,
+    pending: { count: 0, amount: 0 },
+    processing: { count: 0, amount: 0 },
+    completed: { count: 0, amount: 0 },
+    failed: { count: 0, amount: 0 }
+  });
+  const [bankTransferLoading, setBankTransferLoading] = useState(false);
+  const [selectedTransferEmployees, setSelectedTransferEmployees] = useState([]);
+  const [showTransferConfirm, setShowTransferConfirm] = useState(false);
+  const [transferType, setTransferType] = useState('individual'); // 'individual' | 'bulk'
+  const [selectedTransferRecord, setSelectedTransferRecord] = useState(null);
+  const [showBankReceiptModal, setShowBankReceiptModal] = useState(false);
+  const [bankReceiptData, setBankReceiptData] = useState(null);
+  const [bankReceiptLoading, setBankReceiptLoading] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportMonth, setReportMonth] = useState(payrollMonth);
+  const [reportStatus, setReportStatus] = useState('ALL');
+  const [reportFormat, setReportFormat] = useState('excel');
 
   // Format payroll data for charts
   const payrollData = useMemo(() => {
@@ -381,17 +406,23 @@ const PayrollManagement = () => {
     };
     
     loadData();
-  }, [filters, fetchPayrolls]);
-  
-  // Debug logging for data changes
+  }, [filters]); // Removed employeePayroll and searchTerm to prevent infinite loop
+
+  // Filter HR-approved records for Finance approval
+  const filteredFinanceRecords = useMemo(() => {
+    return hrPayrollRecords.filter(record => record.status === 'HR_APPROVED');
+  }, [hrPayrollRecords]); // Removed filters dependency as it's not used in the filter logic
+
+  // Debug log for payroll data
   useEffect(() => {
     console.log('PayrollManagement: Employee payroll data updated:', {
       employeePayrollCount: employeePayroll?.length || 0,
       filteredPayrollsCount: filteredPayrolls?.length || 0,
       employeesCount: employees?.length || 0,
+      filteredFinanceRecordsCount: filteredFinanceRecords?.length || 0,
       payrollsCount: payrolls?.length || 0
     });
-  }, [employeePayroll, filteredPayrolls, employees, payrolls]);
+  }, [employeePayroll, filteredPayrolls, employees, payrolls, filteredFinanceRecords]);
 
   // Load setup data when setup tab is selected
   useEffect(() => {
@@ -420,6 +451,13 @@ const PayrollManagement = () => {
       loadDashboardData();
     }
   }, [payrollMonth, user]);
+
+  // Load bank transfer data when component mounts, month changes, or banktransfers tab is selected
+  useEffect(() => {
+    if (user?.role === 'finance' && selectedTab === 'banktransfers') {
+      loadBankTransferData();
+    }
+  }, [payrollMonth, user, selectedTab]);
 
 // Dashboard Functions
 const loadDashboardData = async () => {
@@ -566,6 +604,334 @@ const loadHRPayrollData = async () => {
     } else {
       setSelectedEmployees([]);
     }
+  };
+
+  // Finance Approval Functions
+  const handleFinanceApprove = async (record) => {
+    try {
+      console.log('🔍 Finance approving payroll for:', record.employee?.name);
+      
+      const response = await HRPayrollAPI.financeApprovePayroll(
+        record.id, 
+        `Finance approved payroll for ${record.employee?.name || 'employee'}`
+      );
+
+      console.log('✅ Finance approval response:', response.data);
+      
+      if (response.data.success) {
+        toast.success(`Finance approved payroll for ${record.employee?.name || 'employee'}`);
+        loadHRPayrollData(); // Reload data to show updated status
+        loadDashboardData(); // Refresh dashboard data
+      } else {
+        toast.error('Failed to approve payroll record');
+      }
+    } catch (error) {
+      console.error('❌ Error in Finance approval:', error);
+      toast.error('Failed to approve payroll record');
+    }
+  };
+
+  const handleFinanceBulkApprove = async () => {
+    if (selectedEmployees.length === 0) {
+      toast.error('Please select employees to approve');
+      return;
+    }
+
+    try {
+      console.log('🔍 Finance bulk approving payroll for:', selectedEmployees);
+      
+      const response = await HRPayrollAPI.financeBulkApprovePayroll(
+        selectedEmployees,
+        `Finance bulk approved ${selectedEmployees.length} payroll records`
+      );
+
+      console.log('✅ Finance bulk approval response:', response.data);
+      
+      if (response.data.success) {
+        toast.success(`Finance approved ${response.data.summary.successful} payroll records`);
+        loadHRPayrollData(); // Reload data
+        loadDashboardData(); // Refresh dashboard data
+        setSelectedEmployees([]); // Clear selections
+      } else {
+        toast.error('Failed to approve payroll records');
+      }
+    } catch (error) {
+      console.error('❌ Error in Finance bulk approval:', error);
+      toast.error('Failed to approve payroll records');
+    }
+  };
+
+  // Bank Transfer Functions
+  const loadBankTransferData = async () => {
+    if (!payrollMonth) return;
+    
+    setBankTransferLoading(true);
+    try {
+      console.log('🔍 Loading bank transfer data for month:', payrollMonth);
+      
+      const [transferResponse, summaryResponse] = await Promise.all([
+        HRPayrollAPI.getBankTransferData(payrollMonth),
+        HRPayrollAPI.getBankTransferSummary(payrollMonth)
+      ]);
+
+      console.log('✅ Bank transfer data loaded:', transferResponse.data);
+      console.log('✅ Bank transfer summary loaded:', summaryResponse.data);
+      
+      setBankTransferData(transferResponse.data || []);
+      setBankTransferSummary(summaryResponse.data || {
+        totalEmployees: 0,
+        totalAmount: 0,
+        pending: { count: 0, amount: 0 },
+        processing: { count: 0, amount: 0 },
+        completed: { count: 0, amount: 0 },
+        failed: { count: 0, amount: 0 }
+      });
+      
+    } catch (error) {
+      console.error('❌ Error loading bank transfer data:', error);
+      toast.error('Failed to load bank transfer data');
+    } finally {
+      setBankTransferLoading(false);
+    }
+  };
+
+  const handleIndividualTransfer = (record) => {
+    setSelectedTransferRecord(record);
+    setTransferType('individual');
+    setShowTransferConfirm(true);
+  };
+
+  const handleBulkTransfer = () => {
+    if (selectedTransferEmployees.length === 0) {
+      toast.error('Please select employees for transfer');
+      return;
+    }
+    setTransferType('bulk');
+    setShowTransferConfirm(true);
+  };
+
+  const confirmTransfer = async () => {
+    try {
+      let bankDetailIds = [];
+      
+      if (transferType === 'individual') {
+        bankDetailIds = [selectedTransferRecord.id];
+      } else {
+        bankDetailIds = selectedTransferEmployees;
+      }
+
+      console.log('🔍 Initiating bank transfer for:', bankDetailIds);
+      
+      const response = await HRPayrollAPI.initiateBankTransfer(bankDetailIds);
+      
+      console.log('✅ Bank transfer response:', response.data);
+      
+      if (response.data.success) {
+        toast.success(response.data.message);
+        loadBankTransferData(); // Reload data
+        setSelectedTransferEmployees([]); // Clear selections
+        setShowTransferConfirm(false);
+        setSelectedTransferRecord(null);
+      } else {
+        toast.error('Failed to initiate bank transfer');
+      }
+      
+    } catch (error) {
+      console.error('❌ Error initiating bank transfer:', error);
+      toast.error('Failed to initiate bank transfer');
+    }
+  };
+
+  // Bank Transfer Receipt Functions
+  const loadBankTransferReceipt = async (bankDetailId) => {
+    setBankReceiptLoading(true);
+    try {
+      console.log('🔍 Loading bank transfer receipt for:', bankDetailId);
+      
+      const response = await HRPayrollAPI.getBankTransferReceipt(bankDetailId);
+      
+      console.log('✅ Bank transfer receipt loaded:', response.data);
+      setBankReceiptData(response.data);
+      setShowBankReceiptModal(true);
+      
+    } catch (error) {
+      console.error('❌ Error loading bank transfer receipt:', error);
+      toast.error('Failed to load bank transfer receipt');
+    } finally {
+      setBankReceiptLoading(false);
+    }
+  };
+
+  const handleViewBankReceipt = (record) => {
+    loadBankTransferReceipt(record.id);
+  };
+
+  // Report Generation Functions
+  const generateReport = async () => {
+    setReportLoading(true);
+    try {
+      console.log('🔍 Generating report for tab:', selectedTab, { reportMonth, reportStatus, reportFormat });
+      
+      // Generate Bank Transfer Report for all tabs
+      const response = await HRPayrollAPI.generateBankTransferReport(reportMonth, reportStatus);
+      const reportData = response.data;
+      
+      if (reportFormat === 'excel') {
+        downloadBankTransferExcelReport(reportData);
+      } else {
+        downloadBankTransferPDFReport(reportData);
+      }
+      
+      setShowReportModal(false);
+      toast.success('Report generated successfully');
+      
+    } catch (error) {
+      console.error('❌ Error generating report:', error);
+      toast.error('Failed to generate report');
+    } finally {
+      setReportLoading(false);
+    }
+  };
+
+  const downloadBankTransferExcelReport = (reportData) => {
+    // Prepare data for CSV
+    const csvData = reportData.data.map(record => ({
+      'Employee ID': record.employeeId,
+      'Employee Name': record.employeeName,
+      'Department': record.department,
+      'Designation': record.designation,
+      'Net Salary': record.netSalary,
+      'Bank Name': record.bankName,
+      'Account Number': record.accountNumber,
+      'IFSC Code': record.ifscCode,
+      'Account Holder': record.accountHolderName,
+      'Transfer Status': record.transferStatus,
+      'Transfer Date': record.transferDate,
+      'Transaction ID': record.transactionId,
+      'Processed Date': record.processedDate,
+      'Transfer Amount': record.transferAmount
+    }));
+    
+    // Convert to CSV format
+    const headers = Object.keys(csvData[0] || {});
+    const csvContent = [
+      // Add summary information as comments
+      `# Bank Transfer Report Summary`,
+      `# Month: ${reportData.summary.month}`,
+      `# Status Filter: ${reportData.summary.statusFilter}`,
+      `# Total Employees: ${reportData.summary.totalEmployees}`,
+      `# Total Amount: ₹${reportData.summary.totalAmount.toLocaleString()}`,
+      `# Generated At: ${new Date(reportData.summary.generatedAt).toLocaleString()}`,
+      `# Status Breakdown - PENDING: ${reportData.summary.statusBreakdown.PENDING}, PROCESSING: ${reportData.summary.statusBreakdown.PROCESSING}, COMPLETED: ${reportData.summary.statusBreakdown.COMPLETED}, FAILED: ${reportData.summary.statusBreakdown.FAILED}`,
+      ``,
+      // Add headers
+      headers.join(','),
+      // Add data rows
+      ...csvData.map(row => 
+        headers.map(header => {
+          const value = row[header];
+          // Escape commas and quotes in CSV
+          if (typeof value === 'string' && (value.includes(',') || value.includes('"'))) {
+            return `"${value.replace(/"/g, '""')}"`;
+          }
+          return value;
+        }).join(',')
+      )
+    ].join('\n');
+    
+    // Create and download CSV file
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    
+    link.setAttribute('href', url);
+    const fileName = `Bank_Transfer_Report_${reportData.summary.month}_${reportData.summary.statusFilter}_${new Date().toISOString().slice(0, 10)}.csv`;
+    link.setAttribute('download', fileName);
+    link.style.visibility = 'hidden';
+    
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const downloadBankTransferPDFReport = (reportData) => {
+    // Create PDF content
+    let pdfContent = `
+      <html>
+        <head>
+          <title>Bank Transfer Report</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 20px; }
+            .header { text-align: center; margin-bottom: 30px; }
+            .summary { margin-bottom: 30px; }
+            .summary table { width: 100%; border-collapse: collapse; }
+            .summary th, .summary td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+            .data table { width: 100%; border-collapse: collapse; font-size: 12px; }
+            .data th, .data td { border: 1px solid #ddd; padding: 6px; text-align: left; }
+            .data th { background-color: #f2f2f2; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>Bank Transfer Report</h1>
+            <p>Month: ${reportData.summary.month} | Status: ${reportData.summary.statusFilter}</p>
+            <p>Generated on: ${new Date(reportData.summary.generatedAt).toLocaleString()}</p>
+          </div>
+          
+          <div class="summary">
+            <h3>Summary</h3>
+            <table>
+              <tr><td><strong>Total Employees</strong></td><td>${reportData.summary.totalEmployees}</td></tr>
+              <tr><td><strong>Total Amount</strong></td><td>₹${reportData.summary.totalAmount.toLocaleString()}</td></tr>
+              <tr><td><strong>PENDING</strong></td><td>${reportData.summary.statusBreakdown.PENDING}</td></tr>
+              <tr><td><strong>PROCESSING</strong></td><td>${reportData.summary.statusBreakdown.PROCESSING}</td></tr>
+              <tr><td><strong>COMPLETED</strong></td><td>${reportData.summary.statusBreakdown.COMPLETED}</td></tr>
+              <tr><td><strong>FAILED</strong></td><td>${reportData.summary.statusBreakdown.FAILED}</td></tr>
+            </table>
+          </div>
+          
+          <div class="data">
+            <h3>Bank Transfer Details</h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>Employee ID</th>
+                  <th>Name</th>
+                  <th>Net Salary</th>
+                  <th>Bank</th>
+                  <th>Account</th>
+                  <th>Status</th>
+                  <th>Transfer Date</th>
+                  <th>Transaction ID</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${reportData.data.map(record => `
+                  <tr>
+                    <td>${record.employeeId}</td>
+                    <td>${record.employeeName}</td>
+                    <td>₹${record.netSalary.toLocaleString()}</td>
+                    <td>${record.bankName}</td>
+                    <td>${record.accountNumber}</td>
+                    <td>${record.transferStatus}</td>
+                    <td>${record.transferDate}</td>
+                    <td>${record.transactionId}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        </body>
+      </html>
+    `;
+    
+    // Create and download PDF
+    const fileName = `Bank_Transfer_Report_${reportData.summary.month}_${reportData.summary.statusFilter}_${new Date().toISOString().slice(0, 10)}.pdf`;
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(pdfContent);
+    printWindow.document.close();
+    printWindow.print();
   };
 
   // HR Payroll Status Colors
@@ -1058,7 +1424,7 @@ const loadHRPayrollData = async () => {
     const filename = `bulk_payroll_report_${new Date().toISOString().split('T')[0]}.csv`;
     
     downloadCSV(csvContent, filename);
-    alert('Bulk payroll report exported successfully!');
+    toast.success('Bulk payroll report exported successfully!');
   };
   
   const generateBulkPayrollCSV = () => {
@@ -1138,9 +1504,12 @@ const loadHRPayrollData = async () => {
             <Download className="h-4 w-4" />
             <span>Export Payroll</span>
           </Button>
-          <Button variant="default" className="flex items-center space-x-2" onClick={() => alert('Payroll processing functionality coming soon!')}>
+          <Button 
+            onClick={() => setShowReportModal(true)}
+            className="bg-blue-600 hover:bg-blue-700 text-white flex items-center space-x-2"
+          >
             <FileText className="h-4 w-4" />
-            <span>Process Payroll</span>
+            <span>Generate Report</span>
           </Button>
         </div>
       </div>
@@ -1150,6 +1519,8 @@ const loadHRPayrollData = async () => {
         <nav className="-mb-px flex space-x-8">
           {(user?.role === 'hr' 
             ? ['overview', 'payroll'] 
+            : user?.role === 'finance'
+            ? ['overview', 'finance', 'banktransfers']
             : ['overview', 'payroll', 'setup', 'templates', 'settings', 'taxcompliance', 'reimbursements']
           ).map((tab) => (
             <button
@@ -1161,7 +1532,8 @@ const loadHRPayrollData = async () => {
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
               }`}
             >
-              {tab === 'taxcompliance' ? 'Tax & Compliance' : tab}
+              {tab === 'taxcompliance' ? 'Tax & Compliance' : 
+               tab === 'banktransfers' ? 'Bank Transfers' : tab}
             </button>
           ))}
         </nav>
@@ -1503,6 +1875,425 @@ const loadHRPayrollData = async () => {
                             </td>
                           </tr>
                         ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Finance Tab */}
+      {selectedTab === 'finance' && (
+        <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Finance Payroll Management</CardTitle>
+              <CardDescription>Approve HR-approved payroll and manage payments</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center space-x-4">
+                  <div className="relative flex-1 max-w-sm">
+                    <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                    <Input
+                      placeholder="Search employees..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="pl-10"
+                    />
+                  </div>
+                  <input
+                    type="month"
+                    value={payrollMonth}
+                    onChange={(e) => setPayrollMonth(e.target.value)}
+                    className="px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700"
+                  />
+                  <Button variant="outline" className="flex items-center space-x-2">
+                    <Filter className="h-4 w-4" />
+                    <span>Filter</span>
+                  </Button>
+                </div>
+                
+                <div className="flex items-center space-x-3">
+                  <Button 
+                    onClick={handleFinanceBulkApprove}
+                    variant="outline"
+                    disabled={selectedEmployees.length === 0 || hrPayrollLoading}
+                    className="flex items-center space-x-2 bg-green-600 hover:bg-green-700 text-white"
+                  >
+                    <CheckCircle className="h-4 w-4" />
+                    <span>Approve for Payment ({selectedEmployees.length})</span>
+                  </Button>
+                  <Button 
+                    onClick={() => {/* TODO: Implement payment file generation */}}
+                    variant="outline"
+                    className="flex items-center space-x-2"
+                  >
+                    <FileText className="h-4 w-4" />
+                    <span>Generate Payment File</span>
+                  </Button>
+                </div>
+              </div>
+
+              {hrPayrollLoading && (
+                <div className="flex items-center justify-center py-8">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                  <span className="ml-2">Loading payroll data...</span>
+                </div>
+              )}
+
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-gray-200 dark:border-gray-700">
+                      <th className="w-12 py-3 px-4">
+                        <input
+                          type="checkbox"
+                          checked={selectedEmployees.length === filteredFinanceRecords.length && filteredFinanceRecords.length > 0}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedEmployees(filteredFinanceRecords.map(record => record.id));
+                            } else {
+                              setSelectedEmployees([]);
+                            }
+                          }}
+                          className="rounded border-gray-300"
+                        />
+                      </th>
+                      <th className="text-left py-3 px-4 font-medium text-gray-900 dark:text-white">Employee</th>
+                      <th className="text-left py-3 px-4 font-medium text-gray-900 dark:text-white">Department</th>
+                      <th className="text-right py-3 px-4 font-medium text-gray-900 dark:text-white">Basic Salary</th>
+                      <th className="text-right py-3 px-4 font-medium text-gray-900 dark:text-white">Allowances</th>
+                      <th className="text-right py-3 px-4 font-medium text-gray-900 dark:text-white">Deductions</th>
+                      <th className="text-right py-3 px-4 font-medium text-gray-900 dark:text-white">Net Salary</th>
+                      <th className="text-center py-3 px-4 font-medium text-gray-900 dark:text-white">Status</th>
+                      <th className="text-center py-3 px-4 font-medium text-gray-900 dark:text-white">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredFinanceRecords.length === 0 ? (
+                      <tr>
+                        <td colSpan="9" className="text-center py-8 text-gray-500">
+                          No HR-approved payroll records found for finance approval
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredFinanceRecords
+                        .filter(record => record.employee?.name?.toLowerCase().includes(searchTerm.toLowerCase()) || '')
+                        .map((record) => (
+                          <tr key={record.id} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
+                            <td className="py-3 px-4">
+                              <input
+                                type="checkbox"
+                                checked={selectedEmployees.includes(record.id)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedEmployees([...selectedEmployees, record.id]);
+                                  } else {
+                                    setSelectedEmployees(selectedEmployees.filter(id => id !== record.id));
+                                  }
+                                }}
+                                className="rounded border-gray-300"
+                              />
+                            </td>
+                            <td className="py-3 px-4">
+                              <div className="flex items-center space-x-3">
+                                <div className="w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center">
+                                  <User className="h-4 w-4 text-primary" />
+                                </div>
+                                <div>
+                                  <div className="font-medium text-gray-900 dark:text-white">
+                                    {record.employee?.name || 'Unknown'}
+                                  </div>
+                                  <div className="text-sm text-gray-500">
+                                    {record.employee?.employeeId || 'N/A'}
+                                  </div>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="py-3 px-4 text-gray-900 dark:text-white">
+                              {record.employee?.department || 'N/A'}
+                            </td>
+                            <td className="py-3 px-4 text-right text-gray-900 dark:text-white">
+                              ₹{Number(record.baseSalary || 0).toLocaleString()}
+                            </td>
+                            <td className="py-3 px-4 text-right text-gray-900 dark:text-white">
+                              ₹{Number(record.totalAllowances || 0).toLocaleString()}
+                            </td>
+                            <td className="py-3 px-4 text-right text-gray-900 dark:text-white">
+                              ₹{Number(record.totalDeductions || 0).toLocaleString()}
+                            </td>
+                            <td className="py-3 px-4 text-right font-medium text-gray-900 dark:text-white">
+                              ₹{Number(record.netSalary || 0).toLocaleString()}
+                            </td>
+                            <td className="py-3 px-4 text-center">
+                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                record.status === 'HR_APPROVED' 
+                                  ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400'
+                                  : record.status === 'FINANCE_APPROVED'
+                                  ? 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400'
+                                  : 'bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-400'
+                              }`}>
+                                {record.status === 'HR_APPROVED' ? 'Pending Finance' : 
+                                 record.status === 'FINANCE_APPROVED' ? 'Finance Approved' : 
+                                 record.status}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4">
+                              <div className="flex items-center justify-center space-x-2">
+                                {record.status === 'HR_APPROVED' && (
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleFinanceApprove(record)}
+                                    className="bg-green-600 hover:bg-green-700 text-white"
+                                  >
+                                    <CheckCircle className="h-3 w-3 mr-1" />
+                                    Approve
+                                  </Button>
+                                )}
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => {
+                                    setSelectedPayrollRecord(record);
+                                    setShowViewModal(true);
+                                  }}
+                                >
+                                  <Eye className="h-3 w-3 mr-1" />
+                                  View
+                                </Button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Bank Transfers Tab */}
+      {selectedTab === 'banktransfers' && (
+        <div className="space-y-6">
+          {/* Header with Month Filter */}
+          <Card>
+            <CardHeader>
+              <div className="flex justify-between items-center">
+                <div>
+                  <CardTitle>Bank Transfers</CardTitle>
+                  <CardDescription>Manage bank transfers for Finance-approved payroll</CardDescription>
+                </div>
+                <div className="flex items-center space-x-4">
+                  <input
+                    type="month"
+                    value={payrollMonth}
+                    onChange={(e) => setPayrollMonth(e.target.value)}
+                    className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                  />
+                </div>
+              </div>
+            </CardHeader>
+          </Card>
+
+          {/* Transfer Summary Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <Card>
+              <CardContent className="p-6">
+                <div className="flex items-center">
+                  <div className="p-2 bg-blue-100 rounded-lg dark:bg-blue-900/20">
+                    <Users className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+                  </div>
+                  <div className="ml-4">
+                    <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Total Employees</p>
+                    <p className="text-2xl font-bold text-gray-900 dark:text-white">{bankTransferSummary.totalEmployees}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="p-6">
+                <div className="flex items-center">
+                  <div className="p-2 bg-green-100 rounded-lg dark:bg-green-900/20">
+                    <DollarSign className="h-6 w-6 text-green-600 dark:text-green-400" />
+                  </div>
+                  <div className="ml-4">
+                    <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Total Amount</p>
+                    <p className="text-2xl font-bold text-gray-900 dark:text-white">₹{bankTransferSummary.totalAmount.toLocaleString()}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="p-6">
+                <div className="flex items-center">
+                  <div className="p-2 bg-yellow-100 rounded-lg dark:bg-yellow-900/20">
+                    <Clock className="h-6 w-6 text-yellow-600 dark:text-yellow-400" />
+                  </div>
+                  <div className="ml-4">
+                    <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Pending</p>
+                    <p className="text-2xl font-bold text-gray-900 dark:text-white">{bankTransferSummary.pending.count}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="p-6">
+                <div className="flex items-center">
+                  <div className="p-2 bg-green-100 rounded-lg dark:bg-green-900/20">
+                    <CheckCircle className="h-6 w-6 text-green-600 dark:text-green-400" />
+                  </div>
+                  <div className="ml-4">
+                    <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Completed</p>
+                    <p className="text-2xl font-bold text-gray-900 dark:text-white">{bankTransferSummary.completed.count}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Bank Transfer Table */}
+          <Card>
+            <CardHeader>
+              <div className="flex justify-between items-center">
+                <div>
+                  <CardTitle>Bank Transfer Management</CardTitle>
+                  <CardDescription>Finance-approved employees ready for bank transfer</CardDescription>
+                </div>
+                <div className="flex items-center space-x-3">
+                  <Button 
+                    variant="outline"
+                    disabled={selectedTransferEmployees.length === 0 || bankTransferLoading}
+                    onClick={handleBulkTransfer}
+                    className="flex items-center space-x-2 bg-green-600 hover:bg-green-700 text-white"
+                  >
+                    <CreditCard className="h-4 w-4" />
+                    <span>Transfer Selected ({selectedTransferEmployees.length})</span>
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-gray-200 dark:border-gray-700">
+                      <th className="w-12 py-3 px-4">
+                        <input
+                          type="checkbox"
+                          checked={selectedTransferEmployees.length === bankTransferData.length && bankTransferData.length > 0}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedTransferEmployees(bankTransferData.map(record => record.id));
+                            } else {
+                              setSelectedTransferEmployees([]);
+                            }
+                          }}
+                          className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                      </th>
+                      <th className="text-left py-3 px-4 font-medium text-gray-900 dark:text-white">Employee</th>
+                      <th className="text-left py-3 px-4 font-medium text-gray-900 dark:text-white">Bank Details</th>
+                      <th className="text-left py-3 px-4 font-medium text-gray-900 dark:text-white">IFSC Code</th>
+                      <th className="text-left py-3 px-4 font-medium text-gray-900 dark:text-white">Transfer Amount</th>
+                      <th className="text-left py-3 px-4 font-medium text-gray-900 dark:text-white">Status</th>
+                      <th className="text-left py-3 px-4 font-medium text-gray-900 dark:text-white">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {bankTransferLoading ? (
+                      <tr>
+                        <td colSpan="7" className="text-center py-8 text-gray-500">
+                          Loading bank transfer data...
+                        </td>
+                      </tr>
+                    ) : bankTransferData.length === 0 ? (
+                      <tr>
+                        <td colSpan="7" className="text-center py-8 text-gray-500">
+                          No Finance-approved employees found for bank transfer
+                        </td>
+                      </tr>
+                    ) : (
+                      bankTransferData.map((record) => (
+                        <tr key={record.id} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
+                          <td className="py-3 px-4">
+                            <input
+                              type="checkbox"
+                              checked={selectedTransferEmployees.includes(record.id)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedTransferEmployees([...selectedTransferEmployees, record.id]);
+                                } else {
+                                  setSelectedTransferEmployees(selectedTransferEmployees.filter(id => id !== record.id));
+                                }
+                              }}
+                              className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                            />
+                          </td>
+                          <td className="py-3 px-4">
+                            <div>
+                              <div className="font-medium text-gray-900 dark:text-white">{record.employee?.name}</div>
+                              <div className="text-sm text-gray-500 dark:text-gray-400">{record.employee?.id}</div>
+                            </div>
+                          </td>
+                          <td className="py-3 px-4">
+                            <div>
+                              <div className="font-medium text-gray-900 dark:text-white">{record.bankDetails?.bankName}</div>
+                              <div className="text-sm text-gray-500 dark:text-gray-400">{record.bankDetails?.accountNumber}</div>
+                              <div className="text-xs text-gray-400">{record.bankDetails?.accountHolderName}</div>
+                            </div>
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className="text-sm font-mono text-gray-900 dark:text-white">{record.bankDetails?.ifscCode}</span>
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className="font-medium text-gray-900 dark:text-white">₹{Number(record.transferAmount).toLocaleString()}</span>
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                              record.transferStatus === 'PENDING' 
+                                ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400'
+                                : record.transferStatus === 'PROCESSING'
+                                ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400'
+                                : record.transferStatus === 'COMPLETED'
+                                ? 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400'
+                                : 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400'
+                            }`}>
+                              {record.transferStatus}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="flex items-center space-x-2">
+                              {record.transferStatus === 'PENDING' && (
+                                <Button
+                                  size="sm"
+                                  onClick={() => handleIndividualTransfer(record)}
+                                  className="bg-green-600 hover:bg-green-700 text-white"
+                                >
+                                  <CreditCard className="h-3 w-3 mr-1" />
+                                  Transfer
+                                </Button>
+                              )}
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleViewBankReceipt(record)}
+                                disabled={bankReceiptLoading}
+                              >
+                                <Eye className="h-3 w-3 mr-1" />
+                                {bankReceiptLoading ? 'Loading...' : 'View'}
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
                     )}
                   </tbody>
                 </table>
@@ -3073,6 +3864,470 @@ const loadHRPayrollData = async () => {
               >
                 <CheckCircle className="h-4 w-4 mr-2" />
                 {hrPayrollLoading ? 'Approving...' : 'Approve All Selected'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bank Transfer Confirmation Modal */}
+      {showTransferConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                Confirm Bank Transfer
+              </h3>
+              <Button 
+                variant="ghost" 
+                size="sm"
+                onClick={() => {
+                  setShowTransferConfirm(false);
+                  setSelectedTransferRecord(null);
+                }}
+              >
+                <XCircle className="h-4 w-4" />
+              </Button>
+            </div>
+            
+            <div className="space-y-4">
+              {transferType === 'individual' && selectedTransferRecord ? (
+                <div>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+                    You are about to initiate a bank transfer for:
+                  </p>
+                  <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 space-y-2">
+                    <div className="flex justify-between">
+                      <span className="font-medium">Employee:</span>
+                      <span>{selectedTransferRecord.employee?.name}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-medium">Bank:</span>
+                      <span>{selectedTransferRecord.bankDetails?.bankName}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-medium">Account:</span>
+                      <span>{selectedTransferRecord.bankDetails?.accountNumber}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-medium">Amount:</span>
+                      <span className="font-bold text-green-600">₹{Number(selectedTransferRecord.transferAmount).toLocaleString()}</span>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+                    You are about to initiate bulk bank transfers for:
+                  </p>
+                  <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 space-y-2">
+                    <div className="flex justify-between">
+                      <span className="font-medium">Selected Employees:</span>
+                      <span>{selectedTransferEmployees.length}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-medium">Total Amount:</span>
+                      <span className="font-bold text-green-600">
+                        ₹{bankTransferData
+                          .filter(record => selectedTransferEmployees.includes(record.id))
+                          .reduce((sum, record) => sum + Number(record.transferAmount), 0)
+                          .toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="max-h-32 overflow-y-auto">
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">Employees:</p>
+                    {bankTransferData
+                      .filter(record => selectedTransferEmployees.includes(record.id))
+                      .map(record => (
+                        <div key={record.id} className="text-sm text-gray-600 dark:text-gray-400">
+                          • {record.employee?.name} - ₹{Number(record.transferAmount).toLocaleString()}
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
+              
+              <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 rounded-lg p-3">
+                <p className="text-sm text-yellow-800 dark:text-yellow-200">
+                  ⚠️ This action cannot be undone. The bank transfer will be initiated immediately.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-3 mt-6">
+              <Button 
+                variant="outline" 
+                onClick={() => {
+                  setShowTransferConfirm(false);
+                  setSelectedTransferRecord(null);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button 
+                onClick={confirmTransfer}
+                className="bg-green-600 hover:bg-green-700 text-white"
+              >
+                <CreditCard className="h-4 w-4 mr-2" />
+                Confirm Transfer
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bank Transfer Receipt Modal */}
+      {showBankReceiptModal && bankReceiptData && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-8 w-full max-w-4xl mx-4 max-h-[90vh] overflow-y-auto">
+            {/* Header */}
+            <div className="flex items-center justify-between mb-6 border-b pb-4">
+              <div>
+                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Bank Transfer Receipt</h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400">Receipt #{bankReceiptData.receiptNumber}</p>
+              </div>
+              <Button 
+                variant="ghost" 
+                size="sm"
+                onClick={() => {
+                  setShowBankReceiptModal(false);
+                  setBankReceiptData(null);
+                }}
+              >
+                <XCircle className="h-5 w-5" />
+              </Button>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              {/* Left Column */}
+              <div className="space-y-6">
+                {/* Transfer Information */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">Transfer Information</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-600 dark:text-gray-400">Transaction ID:</span>
+                      <span className="font-mono text-sm">{bankReceiptData.transferId}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-600 dark:text-gray-400">Transfer Date:</span>
+                      <span>{new Date(bankReceiptData.transferDate).toLocaleDateString()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-600 dark:text-gray-400">Status:</span>
+                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                        bankReceiptData.transferStatus === 'COMPLETED' 
+                          ? 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400'
+                          : bankReceiptData.transferStatus === 'PROCESSING'
+                          ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400'
+                          : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400'
+                      }`}>
+                        {bankReceiptData.transferStatus}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-600 dark:text-gray-400">Month:</span>
+                      <span>{bankReceiptData.month}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-600 dark:text-gray-400">Method:</span>
+                      <span>{bankReceiptData.transferMethod}</span>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Employee Information */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">Employee Details</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-600 dark:text-gray-400">Employee ID:</span>
+                      <span>{bankReceiptData.employee.id}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-600 dark:text-gray-400">Name:</span>
+                      <span className="font-medium">{bankReceiptData.employee.name}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-600 dark:text-gray-400">Department:</span>
+                      <span>{bankReceiptData.employee.department}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-600 dark:text-gray-400">Designation:</span>
+                      <span>{bankReceiptData.employee.designation}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-600 dark:text-gray-400">Email:</span>
+                      <span className="text-sm">{bankReceiptData.employee.email}</span>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Salary Breakdown */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">Salary Breakdown</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-600 dark:text-gray-400">Basic Salary:</span>
+                      <span>₹{Number(bankReceiptData.salary.basicSalary || 0).toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-600 dark:text-gray-400">Allowances:</span>
+                      <span className="text-green-600">+₹{Number(bankReceiptData.salary.allowances || 0).toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-600 dark:text-gray-400">Deductions:</span>
+                      <span className="text-red-600">-₹{Number(bankReceiptData.salary.deductions || 0).toLocaleString()}</span>
+                    </div>
+                    <div className="border-t pt-2">
+                      <div className="flex justify-between font-bold">
+                        <span>Net Salary:</span>
+                        <span className="text-green-600">₹{Number(bankReceiptData.salary.netSalary || 0).toLocaleString()}</span>
+                      </div>
+                    </div>
+                    <div className="text-sm text-gray-500 dark:text-gray-400 space-y-1">
+                      <div className="flex justify-between">
+                        <span>Working Days:</span>
+                        <span>{bankReceiptData.salary.workingDays}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Paid Days:</span>
+                        <span>{bankReceiptData.salary.paidDays}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>LWP Days:</span>
+                        <span>{bankReceiptData.salary.lwpDays}</span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Right Column */}
+              <div className="space-y-6">
+                {/* Transfer Amount */}
+                <Card className="border-2 border-green-200 dark:border-green-800">
+                  <CardHeader>
+                    <CardTitle className="text-lg text-green-700 dark:text-green-400">Transfer Amount</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-center">
+                      <div className="text-3xl font-bold text-green-600 dark:text-green-400">
+                        ₹{Number(bankReceiptData.transferAmount).toLocaleString()}
+                      </div>
+                      <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
+                        {bankReceiptData.remarks}
+                      </p>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Recipient Bank Details */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">Recipient Bank Details</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-600 dark:text-gray-400">Bank Name:</span>
+                      <span className="font-medium">{bankReceiptData.recipientBank.bankName}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-600 dark:text-gray-400">Account Holder:</span>
+                      <span>{bankReceiptData.recipientBank.accountHolderName}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-600 dark:text-gray-400">Account Number:</span>
+                      <span className="font-mono text-sm">****{bankReceiptData.recipientBank.accountNumber.slice(-4)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-600 dark:text-gray-400">IFSC Code:</span>
+                      <span className="font-mono text-sm">{bankReceiptData.recipientBank.ifscCode}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-600 dark:text-gray-400">Branch:</span>
+                      <span className="text-sm">{bankReceiptData.recipientBank.branchName}</span>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Sender Bank Details */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">Sender Bank Details</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-600 dark:text-gray-400">Company:</span>
+                      <span className="font-medium">{bankReceiptData.senderBank.companyName}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-600 dark:text-gray-400">Bank Name:</span>
+                      <span className="font-medium">{bankReceiptData.senderBank.bankName}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-600 dark:text-gray-400">Account Holder:</span>
+                      <span>{bankReceiptData.senderBank.accountHolderName}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-600 dark:text-gray-400">Account Number:</span>
+                      <span className="font-mono text-sm">****{bankReceiptData.senderBank.accountNumber.slice(-4)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-600 dark:text-gray-400">IFSC Code:</span>
+                      <span className="font-mono text-sm">{bankReceiptData.senderBank.ifscCode}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="font-medium text-gray-600 dark:text-gray-400">Branch:</span>
+                      <span className="text-sm">{bankReceiptData.senderBank.branchName}</span>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="mt-8 pt-6 border-t">
+              <div className="flex justify-between items-center">
+                <div className="text-sm text-gray-500 dark:text-gray-400">
+                  <p>Generated on: {new Date(bankReceiptData.generatedAt).toLocaleString()}</p>
+                  <p>This is a system-generated receipt.</p>
+                </div>
+                <div className="flex space-x-3">
+                  <Button 
+                    variant="outline"
+                    onClick={() => window.print()}
+                  >
+                    <FileText className="h-4 w-4 mr-2" />
+                    Print
+                  </Button>
+                  <Button 
+                    onClick={() => {
+                      setShowBankReceiptModal(false);
+                      setBankReceiptData(null);
+                    }}
+                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                  >
+                    Close
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Report Generation Modal */}
+      {showReportModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                Generate Report
+              </h3>
+              <Button 
+                variant="ghost" 
+                size="sm"
+                onClick={() => setShowReportModal(false)}
+              >
+                <XCircle className="h-4 w-4" />
+              </Button>
+            </div>
+            
+            <div className="space-y-4">
+              {/* Report Type */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Report Type
+                </label>
+                <div className="flex space-x-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="bg-gray-900 text-white"
+                  >
+                    Monthly
+                  </Button>
+                </div>
+              </div>
+
+              {/* Month Selection */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Month
+                </label>
+                <input
+                  type="month"
+                  value={reportMonth}
+                  onChange={(e) => setReportMonth(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                />
+              </div>
+
+              {/* Status Filter */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Transfer Status
+                </label>
+                <select
+                  value={reportStatus}
+                  onChange={(e) => setReportStatus(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700"
+                >
+                  <option value="ALL">All Status</option>
+                  <option value="PENDING">Pending</option>
+                  <option value="PROCESSING">Processing</option>
+                  <option value="COMPLETED">Completed</option>
+                  <option value="FAILED">Failed</option>
+                </select>
+              </div>
+
+              {/* Export Format */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Export Format
+                </label>
+                <div className="flex space-x-2">
+                  <Button
+                    variant={reportFormat === 'excel' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setReportFormat('excel')}
+                    className={reportFormat === 'excel' ? 'bg-blue-600 text-white' : ''}
+                  >
+                    Excel
+                  </Button>
+                  <Button
+                    variant={reportFormat === 'pdf' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setReportFormat('pdf')}
+                    className={reportFormat === 'pdf' ? 'bg-blue-600 text-white' : ''}
+                  >
+                    PDF
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-3 mt-6">
+              <Button 
+                variant="outline" 
+                onClick={() => setShowReportModal(false)}
+              >
+                Cancel
+              </Button>
+              <Button 
+                onClick={generateReport}
+                disabled={reportLoading}
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                {reportLoading ? 'Generating...' : 'Generate'}
               </Button>
             </div>
           </div>
