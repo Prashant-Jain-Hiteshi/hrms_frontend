@@ -68,15 +68,14 @@ const LeaveTypes = () => {
   };
 
   const handleDelete = async (id) => {
-    if (window.confirm('Are you sure you want to delete this leave type?')) {
-      setLoading(true);
-      try {
-        await deleteLeaveType(id);
-      } catch (error) {
-        setError(error.response?.data?.message || error.message || 'Failed to delete leave type');
-      } finally {
-        setLoading(false);
-      }
+    console.log('Delete leave type requested for ID:', id);
+    setLoading(true);
+    try {
+      await deleteLeaveType(id);
+    } catch (error) {
+      setError(error.response?.data?.message || error.message || 'Failed to delete leave type');
+    } finally {
+      setLoading(false);
     }
   };
 

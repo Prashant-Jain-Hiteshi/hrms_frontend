@@ -224,7 +224,7 @@ const RecruitmentManagement = () => {
 
   const handleCandidateSubmit = () => {
     if (!candidateForm.name || !candidateForm.email || !candidateForm.position) {
-      alert('Please fill in all required fields');
+      console.warn('Please fill in all required fields');
       return;
     }
 
@@ -242,7 +242,7 @@ const RecruitmentManagement = () => {
 
   const handleJobSubmit = () => {
     if (!jobForm.title || !jobForm.department || !jobForm.location) {
-      alert('Please fill in all required fields');
+      console.warn('Please fill in all required fields');
       return;
     }
 
@@ -261,7 +261,7 @@ const RecruitmentManagement = () => {
 
   const handleJobUpdate = () => {
     if (!jobForm.title || !jobForm.department || !jobForm.location) {
-      alert('Please fill in all required fields');
+      console.warn('Please fill in all required fields');
       return;
     }
 
@@ -289,9 +289,8 @@ const RecruitmentManagement = () => {
   };
 
   const handleDeleteJob = (jobId) => {
-    if (window.confirm('Are you sure you want to delete this job posting?')) {
-      deleteJob(jobId);
-    }
+    console.log('Delete job requested for ID:', jobId);
+    deleteJob(jobId);
   };
 
   const handleCandidateStatusUpdate = (candidateId, newStatus) => {

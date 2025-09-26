@@ -309,9 +309,8 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
 };
 
   const handleDeleteRecord = (recordId) => {
-    if (window.confirm('Are you sure you want to delete this attendance record?')) {
-      // Local-only deletion placeholder; backend deletion not implemented
-    }
+    console.log('Delete attendance record requested for ID:', recordId);
+    // Local-only deletion placeholder; backend deletion not implemented
   };
 
   // Handle date click to show attendance details
@@ -516,7 +515,7 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
     const filename = `attendance_report_${new Date().toISOString().split('T')[0]}.csv`;
     
     downloadCSV(csvContent, filename);
-    alert('Attendance report exported successfully!');
+    console.log('Attendance report exported successfully!');
   };
   
   const generateAttendanceCSV = () => {
@@ -1003,7 +1002,7 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
       });
       setShowAddAttendanceModal(false);
       
-      alert('Employee attendance added successfully!');
+      console.log('Employee attendance added successfully!');
       
     } catch (error) {
       console.error('Error adding employee attendance:', error);

@@ -95,9 +95,7 @@ const LeaveCreditConfig = () => {
   };
 
   const handleDelete = async (leaveType) => {
-    if (!confirm(`Are you sure you want to delete the credit configuration for "${leaveType}"? This action cannot be undone.`)) {
-      return;
-    }
+    console.log(`Delete credit configuration requested for: ${leaveType}`);
 
     setLoading(true);
     try {
@@ -118,9 +116,7 @@ const LeaveCreditConfig = () => {
   };
 
   const triggerMonthlyCredits = async () => {
-    if (!confirm('This will process monthly leave credits for all employees. Continue?')) {
-      return;
-    }
+    console.log('Processing monthly leave credits for all employees...');
 
     setLoading(true);
     try {

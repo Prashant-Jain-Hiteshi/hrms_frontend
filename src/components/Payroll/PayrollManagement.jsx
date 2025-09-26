@@ -1077,22 +1077,18 @@ const loadHRPayrollData = async () => {
     if (!componentForm.value || componentForm.value <= 0) {
       errors.value = 'Value must be greater than 0';
     }
-    
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
   };
 
-  const handleComponentSubmit = async (e) => {
-    e.preventDefault();
-    
-    if (!validateComponentForm()) {
-      return;
-    }
+  const triggerMonthlyCredits = async () => {
+    console.log('Processing monthly leave credits for all employees...');
 
     setSetupLoading(true);
     try {
       const formData = {
         ...componentForm,
+        calculationMethod: 'FIXED',
         value: parseFloat(componentForm.value)
       };
 
@@ -1129,9 +1125,7 @@ const loadHRPayrollData = async () => {
   };
 
   const handleDeleteComponent = async (component) => {
-    if (!confirm(`Are you sure you want to delete "${component.name}"?`)) {
-      return;
-    }
+    console.log(`Delete component requested: ${component.name}`);
 
     setSetupLoading(true);
     try {
@@ -1229,9 +1223,7 @@ const loadHRPayrollData = async () => {
   };
 
   const handleDeleteBankAccount = async (bankAccount) => {
-    if (!confirm(`Are you sure you want to delete "${bankAccount.bankName}" account?`)) {
-      return;
-    }
+    console.log(`Delete bank account requested: ${bankAccount.bankName}`);
 
     setSetupLoading(true);
     try {
@@ -1415,7 +1407,7 @@ const loadHRPayrollData = async () => {
 
   const generatePayslip = (employee) => {
     // In a real app, this would generate a PDF
-    alert(`Payslip generated for ${employee.name}`);
+    console.log(`Payslip generated for ${employee.name}`);
   };
 
   const handleBulkExport = () => {
@@ -1454,7 +1446,7 @@ const loadHRPayrollData = async () => {
     const filename = `payslip_${payslip.name.replace(/\s+/g, '_')}_${selectedMonth.replace(/\s+/g, '_')}.csv`;
     
     downloadCSV(csvContent, filename);
-    alert(`Payslip for ${payslip.name} downloaded successfully!`);
+    console.log(`Payslip for ${payslip.name} downloaded successfully!`);
   };
   
   const generatePayslipCSV = (payslip) => {

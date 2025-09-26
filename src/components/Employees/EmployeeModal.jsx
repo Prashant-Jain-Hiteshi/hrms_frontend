@@ -2,10 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
-import { X, User, Mail, Phone, MapPin, Calendar, Building, Briefcase } from 'lucide-react';
+import { X, User, Mail, Phone, MapPin, Calendar, Building, Briefcase, Loader2 } from 'lucide-react';
 import { MOCK_DEPARTMENTS } from '../../data/mockData';
 
-const EmployeeModal = ({ isOpen, onClose, onSubmit, title, employee = null }) => {
+const EmployeeModal = ({ isOpen, onClose, onSubmit, title, employee = null, isLoading = false }) => {
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -278,11 +278,19 @@ const EmployeeModal = ({ isOpen, onClose, onSubmit, title, employee = null }) =>
                   type="button"
                   variant="outline"
                   onClick={onClose}
+                  disabled={isLoading}
                 >
                   Cancel
                 </Button>
-                <Button type="submit">
-                  {employee ? 'Update Employee' : 'Add Employee'}
+                <Button type="submit" disabled={isLoading}>
+                  {isLoading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      {employee ? 'Updating...' : 'Adding...'}
+                    </>
+                  ) : (
+                    employee ? 'Update Employee' : 'Add Employee'
+                  )}
                 </Button>
               </div>
             </form>

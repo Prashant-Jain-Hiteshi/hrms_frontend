@@ -119,7 +119,7 @@ const ExpenseManagement = () => {
 
   const handleExpenseSubmit = () => {
     if (!expenseForm.description || !expenseForm.amount || !expenseForm.date) {
-      alert('Please fill in all required fields');
+      console.warn('Please fill in all required fields');
       return;
     }
 
@@ -155,9 +155,8 @@ const ExpenseManagement = () => {
   };
 
   const handleDeleteExpense = (expenseId) => {
-    if (window.confirm('Are you sure you want to delete this expense?')) {
-      deleteExpense(expenseId);
-    }
+    console.log('Delete expense requested for ID:', expenseId);
+    deleteExpense(expenseId);
   };
 
   const handleEditExpense = (expense) => {
@@ -174,7 +173,7 @@ const ExpenseManagement = () => {
 
   const handleUpdateExpense = () => {
     if (!expenseForm.description || !expenseForm.amount || !expenseForm.date) {
-      alert('Please fill in all required fields');
+      console.warn('Please fill in all required fields');
       return;
     }
 
@@ -336,7 +335,7 @@ const ExpenseManagement = () => {
                   <option value="approved">Approved</option>
                   <option value="rejected">Rejected</option>
                 </select>
-                <Button variant="outline" className="flex items-center space-x-2" onClick={() => alert('Filter functionality coming soon!')}>
+                <Button variant="outline" className="flex items-center space-x-2" onClick={() => console.log('Filter functionality coming soon!')}>
                   <Filter className="h-4 w-4" />
                   <span>More Filters</span>
                 </Button>

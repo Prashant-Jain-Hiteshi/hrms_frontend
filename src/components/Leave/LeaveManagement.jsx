@@ -121,7 +121,6 @@ const LeaveManagement = () => {
       setEditingCompensatory(null);
     } catch (error) {
       console.error('Error saving compensatory leave:', error);
-      alert('Error saving compensatory leave. Please try again.');
     } finally {
       setLoadingCompensatory(false);
     }
@@ -140,18 +139,17 @@ const LeaveManagement = () => {
   };
 
   const handleDeleteCompensatory = async (id) => {
-    if (window.confirm('Are you sure you want to delete this compensatory leave?')) {
-      setLoadingCompensatory(true);
-      try {
-        await compensatoryLeaveAPI.delete(id);
-        await fetchCompensatoryData();
-        notify({ type: 'success', message: 'Compensatory leave deleted successfully' });
-      } catch (error) {
-        console.error('Error deleting compensatory leave:', error);
-        notify({ type: 'error', message: 'Error deleting compensatory leave. Please try again.' });
-      } finally {
-        setLoadingCompensatory(false);
-      }
+    console.log('Delete compensatory leave requested for ID:', id);
+    setLoadingCompensatory(true);
+    try {
+      await compensatoryLeaveAPI.delete(id);
+      await fetchCompensatoryData();
+      notify({ type: 'success', message: 'Compensatory leave deleted successfully' });
+    } catch (error) {
+      console.error('Error deleting compensatory leave:', error);
+      notify({ type: 'error', message: 'Error deleting compensatory leave. Please try again.' });
+    } finally {
+      setLoadingCompensatory(false);
     }
   };
 

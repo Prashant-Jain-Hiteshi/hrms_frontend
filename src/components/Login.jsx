@@ -304,7 +304,7 @@ const Login = () => {
           )}
 
           {/* Demo Credentials */}
-          <Card className="shadow-lg border-0 bg-white/60 backdrop-blur-sm">
+          {/* <Card className="shadow-lg border-0 bg-white/60 backdrop-blur-sm">
             <CardHeader className="pb-4">
               <CardTitle className="text-lg text-gray-900">Demo Credentials</CardTitle>
               <CardDescription>Click any credential below to auto-fill the form</CardDescription>
@@ -329,7 +329,7 @@ const Login = () => {
                 ))}
               </div>
             </CardContent>
-          </Card>
+          </Card> */}
         </div>
       </div>
     </div>

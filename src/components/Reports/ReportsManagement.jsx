@@ -44,7 +44,7 @@ const ReportsManagement = () => {
 
   const handleReportSubmit = () => {
     if (!reportForm.name || !reportForm.description) {
-      alert('Please fill in all required fields');
+      console.warn('Please fill in all required fields');
       return;
     }
 
@@ -81,7 +81,7 @@ const ReportsManagement = () => {
 
   const handleUpdateReport = () => {
     if (!reportForm.name || !reportForm.description) {
-      alert('Please fill in all required fields');
+      console.warn('Please fill in all required fields');
       return;
     }
 
@@ -105,9 +105,8 @@ const ReportsManagement = () => {
   };
 
   const handleDeleteReport = (reportId) => {
-    if (window.confirm('Are you sure you want to delete this report?')) {
-      deleteReport(reportId);
-    }
+    console.log('Delete report requested for ID:', reportId);
+    deleteReport(reportId);
   };
 
   const handleGenerateAndDownloadReport = (reportId) => {
@@ -218,7 +217,7 @@ const ReportsManagement = () => {
     }
     
     downloadCSV(csvContent, filename);
-    alert(`Report "${report.name}" generated and downloaded successfully!`);
+    console.log(`Report "${report.name}" generated and downloaded successfully!`);
   };
 
   const handleDownloadReport = (reportId) => {
@@ -245,9 +244,9 @@ const ReportsManagement = () => {
     } else {
       // Fallback: copy to clipboard
       navigator.clipboard.writeText(shareUrl).then(() => {
-        alert('Report link copied to clipboard!');
+        console.log('Report link copied to clipboard!');
       }).catch(() => {
-        alert(`Share this link: ${shareUrl}`);
+        console.log(`Share this link: ${shareUrl}`);
       });
     }
   };
@@ -464,7 +463,7 @@ const ReportsManagement = () => {
                   <option value="monthly">Monthly</option>
                   <option value="quarterly">Quarterly</option>
                 </select>
-                <Button variant="outline" className="flex items-center space-x-2" onClick={() => alert('Filter functionality coming soon!')}>
+                <Button variant="outline" className="flex items-center space-x-2" onClick={() => console.log('Filter functionality coming soon!')}>
                   <Filter className="h-4 w-4" />
                   <span>More Filters</span>
                 </Button>

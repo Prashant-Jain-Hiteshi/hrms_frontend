@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { ThemeProvider } from './contexts/ThemeContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { DataProvider } from './contexts/DataContext';
+import { ToastProvider } from './components/ui/Toast';
 import Login from './components/Login';
 import Layout from './components/Layout/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -10,8 +11,6 @@ import AdminDashboard from './components/Dashboard/AdminDashboard';
 import HRDashboard from './components/Dashboard/HRDashboard';
 import EmployeeDashboard from './components/Dashboard/EmployeeDashboard';
 import FinanceDashboard from './components/Dashboard/FinanceDashboard';
-import { ToastContainer } from 'react-toastify';
-import 'react-toastify/dist/ReactToastify.css';
 
 // Dashboard Router Component
 const DashboardRouter = () => {
@@ -48,9 +47,10 @@ import SettingsManagement from './components/Settings/SettingsManagement';
 function App() {
   return (
     <ThemeProvider>
-      <AuthProvider>
-        <DataProvider>
-          <Router>
+      <ToastProvider>
+        <AuthProvider>
+          <DataProvider>
+            <Router>
           <div className="min-h-screen bg-background text-foreground">
             <Routes>
               <Route path="/login" element={<Login />} />
@@ -78,21 +78,10 @@ function App() {
               </Route>
             </Routes>
           </div>
-          <ToastContainer
-            position="top-right"
-            autoClose={3000}
-            hideProgressBar={false}
-            newestOnTop={false}
-            closeOnClick
-            rtl={false}
-            pauseOnFocusLoss
-            draggable
-            pauseOnHover
-            theme="colored"
-          />
-        </Router>
-        </DataProvider>
-      </AuthProvider>
+            </Router>
+          </DataProvider>
+        </AuthProvider>
+      </ToastProvider>
     </ThemeProvider>
   );
 }

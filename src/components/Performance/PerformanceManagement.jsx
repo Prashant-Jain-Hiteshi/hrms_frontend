@@ -141,9 +141,8 @@ const PerformanceManagement = () => {
   };
 
   const handleDeleteGoal = (goalId) => {
-    if (window.confirm('Are you sure you want to delete this goal?')) {
-      deleteGoal(goalId);
-    }
+    console.log('Delete goal requested for ID:', goalId);
+    deleteGoal(goalId);
   };
 
   const handleReviewUpdate = (reviewId, updates) => {
@@ -152,7 +151,7 @@ const PerformanceManagement = () => {
 
   const handleGoalSubmit = () => {
     if (!goalForm.title || !goalForm.description || !goalForm.targetDate) {
-      alert('Please fill in all required fields');
+      console.warn('Please fill in all required fields');
       return;
     }
 
@@ -177,7 +176,7 @@ const PerformanceManagement = () => {
 
   const handleGoalUpdate = () => {
     if (!goalForm.title || !goalForm.description || !goalForm.targetDate) {
-      alert('Please fill in all required fields');
+      console.warn('Please fill in all required fields');
       return;
     }
 

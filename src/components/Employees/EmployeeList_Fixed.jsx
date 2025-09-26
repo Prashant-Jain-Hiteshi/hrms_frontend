@@ -135,9 +135,8 @@ const EmployeeList = () => {
       if (fetchEmployees) {
         await fetchEmployees();
       }
-      
-      console.log('Employee deleted successfully!');
       toast.success(`Employee "${employeeToDelete.name}" has been deleted successfully!`, 5000);
+      console.log('Employee deleted successfully!');
     } catch (error) {
       console.error('Error deleting employee:', error);
       setDeleteError('Failed to delete employee. This employee may have associated records that prevent deletion.');
@@ -145,6 +144,7 @@ const EmployeeList = () => {
       setIsDeleting(false);
     }
   };
+
   const cancelDelete = () => {
     setShowDeleteModal(false);
     setEmployeeToDelete(null);
@@ -153,7 +153,7 @@ const EmployeeList = () => {
 
   const openEditModal = (employee) => {
     if (!canManage) {
-      console.warn('Permission denied: Only HR and Admin can edit employees.');
+      toast.error('Permission denied: Only HR and Admin can edit employees.');
       return;
     }
     setSelectedEmployee(employee);
@@ -433,22 +433,6 @@ const EmployeeList = () => {
                       </div>
                     </div>
                   )}
-
-                  <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3">
-                    <div className="flex items-start">
-                      <AlertTriangle className="h-4 w-4 text-yellow-600 dark:text-yellow-400 mr-2 mt-0.5" />
-                      <div className="text-sm text-yellow-700 dark:text-yellow-300">
-                        <p className="font-medium">Warning:</p>
-                        <p>Deleting this employee will also remove:</p>
-                        <ul className="list-disc list-inside mt-1 space-y-1">
-                          <li>All attendance records</li>
-                          <li>Leave requests and history</li>
-                          <li>Performance evaluations</li>
-                          <li>Associated user account</li>
-                        </ul>
-                      </div>
-                    </div>
-                  </div>
                 </div>
 
                 {/* Form Actions */}

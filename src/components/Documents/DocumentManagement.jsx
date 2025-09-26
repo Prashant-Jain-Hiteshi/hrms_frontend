@@ -60,7 +60,7 @@ const DocumentManagement = () => {
 
   const handleDocumentSubmit = () => {
     if (!documentForm.name || !documentForm.description) {
-      alert('Please fill in all required fields');
+      console.warn('Please fill in all required fields');
       return;
     }
 
@@ -96,7 +96,7 @@ const DocumentManagement = () => {
 
   const handleUpdateDocument = () => {
     if (!documentForm.name || !documentForm.description) {
-      alert('Please fill in all required fields');
+      console.warn('Please fill in all required fields');
       return;
     }
 
@@ -119,9 +119,8 @@ const DocumentManagement = () => {
   };
 
   const handleDeleteDocument = (documentId) => {
-    if (window.confirm('Are you sure you want to delete this document?')) {
-      deleteDocument(documentId);
-    }
+    console.log('Delete document requested for ID:', documentId);
+    deleteDocument(documentId);
   };
 
   const handleDownloadDocument = (documentId) => {
@@ -143,7 +142,7 @@ const DocumentManagement = () => {
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
       
-      alert(`Document "${document.name}" downloaded successfully!`);
+      console.log(`Document "${document.name}" downloaded successfully!`);
     }
   };
 
@@ -153,7 +152,7 @@ const DocumentManagement = () => {
 
   const handleShareDocument = (documentId) => {
     // Simulate sharing functionality
-    alert('Share link copied to clipboard!');
+    console.log('Share link copied to clipboard!');
   };
 
   const getStatusColor = (status) => {
