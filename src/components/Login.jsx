@@ -5,7 +5,10 @@ import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/Card';
 import Logo from './ui/Logo';
-import { Building2, Mail, Lock, Eye, EyeOff, Users, TrendingUp, Shield, Clock } from 'lucide-react';
+import OTPLogin from './Login/OTPLogin';
+import ForgotPassword from './Login/ForgotPassword';
+import { Building2, Mail, Lock, Eye, EyeOff, Users, TrendingUp, Shield, Clock, Smartphone } from 'lucide-react';
+import { toast } from 'react-toastify';
 
 const Login = () => {
   const [email, setEmail] = useState('');
@@ -13,6 +16,7 @@ const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [currentView, setCurrentView] = useState('login'); // 'login' | 'otp' | 'forgot'
   const { login, isAuthenticated } = useAuth();
   const navigate = useNavigate();
 
@@ -35,17 +39,45 @@ const Login = () => {
       console.log('Login result:', result);
       
       if (result.success) {
-        // Navigate to dashboard on successful login
+        toast.success('Login successful!');
         navigate('/dashboard');
       } else {
         setError(result.error);
+        toast.error(result.error);
       }
     } catch (error) {
       console.error('Login error:', error);
-      setError('An error occurred during login');
+      const errorMessage = 'An error occurred during login';
+      setError(errorMessage);
+      toast.error(errorMessage);
     }
     
     setLoading(false);
+  };
+
+  // Handle OTP login success
+  const handleOTPSuccess = async (data) => {
+    try {
+      // Store the token and user data (similar to regular login)
+      if (data.access_token && data.user) {
+        localStorage.setItem('hrms_token', data.access_token);
+        localStorage.setItem('hrms_user', JSON.stringify(data.user));
+        
+        // Update auth context
+        window.location.reload(); // Simple way to refresh auth state
+      } else {
+        toast.error('Invalid login response');
+      }
+    } catch (error) {
+      console.error('OTP login success handler error:', error);
+      toast.error('Login processing failed');
+    }
+  };
+
+  // Handle forgot password success
+  const handleForgotPasswordSuccess = () => {
+    setCurrentView('login');
+    toast.success('Password reset successfully! Please login with your new password.');
   };
 
   const demoCredentials = [
@@ -137,78 +169,139 @@ const Login = () => {
             </div>
           </div>
 
-          {/* Login Header */}
-          <div className="text-center lg:text-left mb-8">
-            <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Welcome Back</h1>
-            <p className="text-gray-600 dark:text-gray-400">Sign in to access your StaffLoom dashboard</p>
-          </div>
+          {/* Dynamic Content Based on Current View */}
+          {currentView === 'login' && (
+            <>
+              {/* Login Header */}
+              <div className="text-center lg:text-left mb-8">
+                <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Welcome Back</h1>
+                <p className="text-gray-600 dark:text-gray-400">Sign in to access your StaffLoom dashboard</p>
+              </div>
 
-          {/* Login Form */}
-          <Card className="shadow-xl border-0 bg-white/80 backdrop-blur-sm">
-            <CardContent className="p-8">
-              <form onSubmit={handleSubmit} className="space-y-6">
-                <div className="space-y-2">
-                  <label htmlFor="email" className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Email Address
-                  </label>
-                  <div className="relative">
-                    <Mail className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                    <Input
-                      id="email"
-                      type="email"
-                      placeholder="Enter your email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      className="pl-10 h-12 border-gray-200 focus:border-primary focus:ring-primary"
-                      required
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <label htmlFor="password" className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Password
-                  </label>
-                  <div className="relative">
-                    <Lock className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                    <Input
-                      id="password"
-                      type={showPassword ? 'text' : 'password'}
-                      placeholder="Enter your password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      className="pl-10 pr-10 h-12 border-gray-200 focus:border-primary focus:ring-primary"
-                      required
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-3 text-gray-400 hover:text-gray-600 transition-colors"
-                    >
-                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
-                  </div>
-                </div>
-
-                {error && (
-                  <div className="text-red-600 text-sm bg-red-50 dark:bg-red-900/20 p-3 rounded-md border border-red-200">
-                    {error}
-                  </div>
-                )}
-
-                <Button type="submit" className="w-full h-12 text-base font-medium" disabled={loading}>
-                  {loading ? (
-                    <div className="flex items-center space-x-2">
-                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                      <span>Signing in...</span>
+              {/* Login Form */}
+              <Card className="shadow-xl border-0 bg-white/80 backdrop-blur-sm">
+                <CardContent className="p-8">
+                  <form onSubmit={handleSubmit} className="space-y-6">
+                    <div className="space-y-2">
+                      <label htmlFor="email" className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Email Address
+                      </label>
+                      <div className="relative">
+                        <Mail className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                        <Input
+                          id="email"
+                          type="email"
+                          placeholder="Enter your email"
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                          className="pl-10 h-12 border-gray-200 focus:border-primary focus:ring-primary"
+                          required
+                        />
+                      </div>
                     </div>
-                  ) : (
-                    'Sign In'
-                  )}
-                </Button>
-              </form>
-            </CardContent>
-          </Card>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label htmlFor="password" className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                          Password
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setCurrentView('forgot')}
+                          className="text-sm text-primary hover:text-primary/80 font-medium transition-colors"
+                        >
+                          Forgot Password?
+                        </button>
+                      </div>
+                      <div className="relative">
+                        <Lock className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                        <Input
+                          id="password"
+                          type={showPassword ? 'text' : 'password'}
+                          placeholder="Enter your password"
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          className="pl-10 pr-10 h-12 border-gray-200 focus:border-primary focus:ring-primary"
+                          required
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="absolute right-3 top-3 text-gray-400 hover:text-gray-600 transition-colors"
+                        >
+                          {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    {error && (
+                      <div className="text-red-600 text-sm bg-red-50 dark:bg-red-900/20 p-3 rounded-md border border-red-200">
+                        {error}
+                      </div>
+                    )}
+
+                    <Button type="submit" className="w-full h-12 text-base font-medium" disabled={loading}>
+                      {loading ? (
+                        <div className="flex items-center space-x-2">
+                          <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                          <span>Signing in...</span>
+                        </div>
+                      ) : (
+                        'Sign In'
+                      )}
+                    </Button>
+
+                    {/* Divider */}
+                    <div className="relative">
+                      <div className="absolute inset-0 flex items-center">
+                        <div className="w-full border-t border-gray-200 dark:border-gray-600"></div>
+                      </div>
+                      <div className="relative flex justify-center text-sm">
+                        <span className="px-2 bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400">
+                          or
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Login with OTP Button */}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setCurrentView('otp')}
+                      className="w-full h-12 text-base font-medium border-2 border-gray-200 hover:border-primary hover:text-primary transition-colors"
+                    >
+                      <Smartphone className="h-4 w-4 mr-2" />
+                      Login with OTP
+                    </Button>
+                  </form>
+                </CardContent>
+              </Card>
+            </>
+          )}
+
+          {/* OTP Login View */}
+          {currentView === 'otp' && (
+            <Card className="shadow-xl border-0 bg-white/80 backdrop-blur-sm">
+              <CardContent className="p-8">
+                <OTPLogin
+                  onBack={() => setCurrentView('login')}
+                  onSuccess={handleOTPSuccess}
+                />
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Forgot Password View */}
+          {currentView === 'forgot' && (
+            <Card className="shadow-xl border-0 bg-white/80 backdrop-blur-sm">
+              <CardContent className="p-8">
+                <ForgotPassword
+                  onBack={() => setCurrentView('login')}
+                  onSuccess={handleForgotPasswordSuccess}
+                />
+              </CardContent>
+            </Card>
+          )}
 
           {/* Demo Credentials */}
           <Card className="shadow-lg border-0 bg-white/60 backdrop-blur-sm">
