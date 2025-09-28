@@ -96,7 +96,7 @@ class CompensatoryLeaveAPI {
   // Update compensatory leave record (HR/Admin only)
   async update(id, data) {
     const response = await fetch(`${this.baseURL}/${id}`, {
-      method: 'PUT',
+      method: 'PATCH',
       headers: this.getAuthHeaders(),
       body: JSON.stringify(data),
     });

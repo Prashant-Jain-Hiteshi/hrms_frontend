@@ -4,9 +4,10 @@ import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Building2, Save, Edit } from 'lucide-react';
 import { PayrollSetupAPI } from '../../lib/payrollSetupApi';
-import { toast } from 'react-toastify';
+import { useToast } from '../ui/Toast';
 
 const CompanyPayrollInfo = () => {
+  const { toast } = useToast();
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [companyInfo, setCompanyInfo] = useState({

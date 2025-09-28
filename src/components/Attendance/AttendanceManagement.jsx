@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
-import { Users, Clock, Timer, Search, Filter, CheckCircle, XCircle, Eye, Download, Calendar, Plus, User, Save, X, Play, Pause } from 'lucide-react';
+import { Users, Clock, Timer, Search, Filter, CheckCircle, XCircle, Eye, Download, Calendar, Plus, User, Save, X, Play, Pause, AlertCircle } from 'lucide-react';
  
 import { useAuth } from '../../contexts/AuthContext';
 import { useData } from '../../contexts/DataContext';
@@ -65,6 +65,20 @@ const AttendanceManagement = () => {
   const [showDateDetailsModal, setShowDateDetailsModal] = useState(false);
   const [selectedDateDetails, setSelectedDateDetails] = useState(null);
   const [dateDetailsLoading, setDateDetailsLoading] = useState(false);
+
+  // Toast Notifications State
+  const [notifications, setNotifications] = useState([]);
+
+  // Toast notification helper
+  const notify = ({ type = 'info', message = '', timeout = 3000 }) => {
+    const id = `${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
+    setNotifications((prev) => [...prev, { id, type, message }]);
+    if (timeout > 0) {
+      setTimeout(() => {
+        setNotifications((prev) => prev.filter((n) => n.id !== id));
+      }, timeout);
+    }
+  };
 
   // Work Duration Timer State
   const [workDuration, setWorkDuration] = useState('00:00:00');
@@ -583,15 +597,29 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
   const [avgHoursLoading, setAvgHoursLoading] = useState(false);
 
   const adminBackendDate = () => {
-    if (adminType === 'daily') return adminPicker; // yyyy-mm-dd
-    // if picker is like yyyy-mm (from <input type="month">), normalize to first day
-    if (/^\d{4}-\d{2}$/.test(adminPicker)) return `${adminPicker}-01`;
-    // else assume full date string; convert to first-of-month
-    try {
-      const d = new Date(adminPicker);
-      if (!isNaN(d.getTime())) return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10);
-    } catch {}
-    return new Date().toISOString().slice(0, 10);
+    if (adminType === 'daily') {
+      // For daily, ensure we have a valid date format
+      if (/^\d{4}-\d{2}-\d{2}$/.test(adminPicker)) {
+        return adminPicker;
+      }
+      // Fallback to today's date
+      return new Date().toISOString().slice(0, 10);
+    }
+    
+    // For monthly type
+    if (/^\d{4}-\d{2}$/.test(adminPicker)) {
+      // Month format (YYYY-MM) -> convert to first day of month
+      return `${adminPicker}-01`;
+    }
+    
+    // If we have a full date, extract the month and convert to first day
+    if (/^\d{4}-\d{2}-\d{2}$/.test(adminPicker)) {
+      return `${adminPicker.slice(0, 7)}-01`;
+    }
+    
+    // Fallback to current month's first day
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    return `${currentMonth}-01`;
   };
 
   // Dedicated API function for Employee Today's Attendance table ONLY
@@ -1071,6 +1099,14 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
       // Call API to add attendance (we'll need to add this endpoint)
       await AttendanceAPI.addEmployeeAttendance(attendanceData);
 
+      // Show success notification
+      const selectedEmployee = employees.find(emp => emp.id === parseInt(employeeId));
+      const employeeName = selectedEmployee?.name || 'Employee';
+      notify({ 
+        type: 'success', 
+        message: `Attendance added successfully for ${employeeName} on ${date}!` 
+      });
+
       // Refresh attendance data
       if (fetchAllAttendance) {
         await fetchAllAttendance();
@@ -1089,14 +1125,17 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
       });
       setShowAddAttendanceModal(false);
       
-      console.log('Employee attendance added successfully!');
-      
     } catch (error) {
       console.error('Error adding employee attendance:', error);
-      setAddAttendanceError(
-        error.response?.data?.message || 
-        'Failed to add employee attendance. Please try again.'
-      );
+      const errorMessage = error.response?.data?.message || 'Failed to add employee attendance. Please try again.';
+      
+      // Show error notification
+      notify({ 
+        type: 'error', 
+        message: errorMessage 
+      });
+      
+      setAddAttendanceError(errorMessage);
     } finally {
       setIsAddingAttendance(false);
     }
@@ -1104,6 +1143,33 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
 
   return (
     <div className="space-y-6">
+      {/* Toast Notifications */}
+      <div className="fixed top-4 right-4 z-50 space-y-3">
+        {notifications.map((n) => (
+          <div
+            key={n.id}
+            className={`flex items-start gap-3 px-4 py-3 rounded-lg shadow-lg border text-sm transition-all duration-200 ${
+              n.type === 'success'
+                ? 'bg-green-50 border-green-200 text-green-800 dark:bg-green-900/20 dark:text-green-300 dark:border-green-800'
+                : n.type === 'error'
+                ? 'bg-red-50 border-red-200 text-red-800 dark:bg-red-900/20 dark:text-red-300 dark:border-red-800'
+                : 'bg-blue-50 border-blue-200 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300 dark:border-blue-800'
+            }`}
+          >
+            <div className="mt-0.5">
+              {n.type === 'success' ? <CheckCircle className="h-4 w-4" /> : n.type === 'error' ? <AlertCircle className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </div>
+            <div className="flex-1">{n.message}</div>
+            <button
+              className="text-xs opacity-70 hover:opacity-100"
+              onClick={() => setNotifications((prev) => prev.filter((x) => x.id !== n.id))}
+            >
+              Dismiss
+            </button>
+          </div>
+        ))}
+      </div>
+      
       {/* Header */}
       <div className="flex justify-between items-center">
         <div>
@@ -1409,12 +1475,24 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
                   <label className="text-sm">Type:</label>
                   <button
                     className={`px-2 py-1 text-sm rounded border ${adminType === 'daily' ? 'bg-primary text-white' : 'bg-transparent'}`}
-                    onClick={() => setAdminType('daily')}
+                    onClick={() => {
+                      setAdminType('daily');
+                      // When switching to daily, ensure we have a full date
+                      if (!/^\d{4}-\d{2}-\d{2}$/.test(adminPicker)) {
+                        const currentDate = new Date().toISOString().slice(0, 10);
+                        setAdminPicker(currentDate);
+                      }
+                    }}
                     type="button"
                   >Daily</button>
                   <button
                     className={`px-2 py-1 text-sm rounded border ${adminType === 'monthly' ? 'bg-primary text-white' : 'bg-transparent'}`}
-                    onClick={() => setAdminType('monthly')}
+                    onClick={() => {
+                      setAdminType('monthly');
+                      // When switching to monthly, convert current date to month format
+                      const currentMonth = new Date().toISOString().slice(0, 7);
+                      setAdminPicker(currentMonth);
+                    }}
                     type="button"
                   >Monthly</button>
                 </div>

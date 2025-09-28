@@ -68,8 +68,8 @@ const LeaveManagement = () => {
   const tabs = (() => {
     if (isHR) return ['overview', 'mentions', 'compensatory', 'policies'];
     if (role === 'employee') return ['overview', 'requests', 'mentions', 'leavebalance', 'policies'];
-    // Admin and other roles: no Leave Balance
-    return ['overview', 'requests', 'mentions', 'policies', 'calendar'];
+    // Admin: no Requests tab and no Leave Balance
+    return ['overview', 'mentions', 'policies', 'calendar'];
   })();
 
   // simple toast helper
@@ -100,6 +100,8 @@ const LeaveManagement = () => {
         };
         
         await compensatoryLeaveAPI.update(editingCompensatory.id, updateData);
+        // Success toast for update
+        notify({ type: 'success', message: 'Compensatory leave updated successfully' });
       } else {
         // Add new compensatory leave
         const createData = {
@@ -110,6 +112,8 @@ const LeaveManagement = () => {
         };
         
         await compensatoryLeaveAPI.create(createData);
+        // Success toast for create
+        notify({ type: 'success', message: 'Compensatory leave assigned successfully' });
       }
       
       // Refresh data
@@ -121,6 +125,8 @@ const LeaveManagement = () => {
       setEditingCompensatory(null);
     } catch (error) {
       console.error('Error saving compensatory leave:', error);
+      // Error toast
+      notify({ type: 'error', message: 'Failed to save compensatory leave. Please try again.' });
     } finally {
       setLoadingCompensatory(false);
     }
@@ -168,20 +174,25 @@ const LeaveManagement = () => {
     const startWeekday = first.getDay(); // 0..6
     const totalDays = last.getDate();
 
+    // Helper function to format date as YYYY-MM-DD without timezone issues
+    const formatDateLocal = (year, month, day) => {
+      return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    };
+
     // previous month padding
     const prevLast = new Date(y, m - 1, 0);
     const prevDays = prevLast.getDate();
     const leading = Array.from({ length: startWeekday }, (_, i) => {
       const d = prevDays - startWeekday + 1 + i;
       const dt = new Date(y, m - 2, d);
-      return { iso: dt.toISOString().slice(0, 10), day: d, inMonth: false, weekday: dt.getDay() };
+      return { iso: formatDateLocal(y, m - 2, d), day: d, inMonth: false, weekday: dt.getDay() };
     });
 
     // current month
     const current = Array.from({ length: totalDays }, (_, i) => {
       const d = i + 1;
       const dt = new Date(y, m - 1, d);
-      return { iso: dt.toISOString().slice(0, 10), day: d, inMonth: true, weekday: dt.getDay() };
+      return { iso: formatDateLocal(y, m - 1, d), day: d, inMonth: true, weekday: dt.getDay() };
     });
 
     // trailing padding to fill 6 weeks grid
@@ -191,7 +202,7 @@ const LeaveManagement = () => {
     const trailing = Array.from({ length: trailingCount }, (_, i) => {
       const d = i + 1;
       const dt = new Date(y, m, d);
-      return { iso: dt.toISOString().slice(0, 10), day: d, inMonth: false, weekday: dt.getDay() };
+      return { iso: formatDateLocal(y, m, d), day: d, inMonth: false, weekday: dt.getDay() };
     });
 
     return [...leading, ...current, ...trailing];
@@ -683,6 +694,19 @@ const LeaveManagement = () => {
     return Object.keys(errors).length === 0;
   };
 
+  const resetForm = () => {
+    setLeaveForm({
+      leaveType: '',
+      startDate: '',
+      endDate: '',
+      startTime: '09:30',
+      endTime: '19:00',
+      reason: '',
+      toEmployees: [],
+      ccEmployees: []
+    });
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     
@@ -703,11 +727,17 @@ const LeaveManagement = () => {
       };
 
       await addLeaveRequest(leaveData);
+      
+      // Show success notification
+      notify({ type: 'success', message: 'Leave request submitted successfully! Your request is now pending status.' });
+      
       setShowApplyForm(false);
       resetForm();
       setFormErrors({});
     } catch (error) {
       console.error('Leave submission error:', error);
+      // Show error notification
+      notify({ type: 'error', message: 'Failed to submit leave request. Please try again.' });
     }
   };
 
