@@ -578,6 +578,9 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
   // Separate state variables for Monthly Calendar data
   const [calendarData, setCalendarData] = useState([]);
   const [calendarLoading, setCalendarLoading] = useState(false);
+  // Avg hours (today) for admin/hr from backend
+  const [avgHoursToday, setAvgHoursToday] = useState(null);
+  const [avgHoursLoading, setAvgHoursLoading] = useState(false);
 
   const adminBackendDate = () => {
     if (adminType === 'daily') return adminPicker; // yyyy-mm-dd
@@ -654,15 +657,11 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
         const last = new Date(selectedYear, selectedMonth + 1, 0);
         const from = first.toISOString().slice(0, 10);
         const to = last.toISOString().slice(0, 10);
-        
-        // Call API directly and store in separate calendar state
-        const response = await AttendanceAPI.getMyAttendance({ from, to });
-        setCalendarData(response || []);
-        
-        // Calculate totals from the calendar data
-        setTimeout(() => {
-          calculateTotalsFromCalendarData(response || []);
-        }, 100);
+
+        // Correct API and response handling
+        const res = await AttendanceAPI.my({ from, to });
+        const rows = Array.isArray(res?.data) ? res.data : (Array.isArray(res?.data?.rows) ? res.data.rows : []);
+        setCalendarData(rows);
       } else {
         // For admin/HR, fetch all attendance data for the calendar
         const calendarDate = calendarType === 'monthly' ? `${calendarPicker}-01` : calendarPicker;
@@ -678,9 +677,6 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
         // Call API directly and store in separate calendar state
         const response = await AttendanceAPI.getAllAttendance(params);
         setCalendarData(response || []);
-        setTimeout(() => {
-          calculateTotalsFromCalendarData(response || []);
-        }, 100);
       }
     } catch (error) {
       console.error('Error fetching calendar data:', error);
@@ -713,6 +709,62 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [calendarType, calendarPicker, calendarStatus, selectedMonth, selectedYear, user]);
+
+  // Admin/HR Avg Hours (today): ALWAYS compute from allAttendance for today
+  useEffect(() => {
+    const isAdminOrHr = user?.role === 'admin' || user?.role === 'hr';
+    if (!isAdminOrHr) {
+      setAvgHoursToday(null);
+      return;
+    }
+    let cancelled = false;
+    const computeAvgFromAll = () => {
+      try {
+        const rows = (allAttendance || [])
+          .filter(r => String(r?.date) === String(today))
+          .map(r => ({
+            status: r?.status,
+            checkIn: r?.checkIn,
+            checkOut: r?.checkOut,
+            totalHours: r?.hoursWorked,
+          }));
+        const presentRows = rows.filter((r) => {
+          const s = String(r?.status || '').toLowerCase();
+          return s === 'present' || s === 'late' || !!r?.checkIn;
+        });
+        const toNum = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+        const hmsToHours = (t) => {
+          if (!t || typeof t !== 'string' || !/^\d{1,2}:\d{2}(:\d{2})?$/.test(t)) return null;
+          const [hh, mm, ss = '0'] = t.split(':');
+          const h = Number(hh), m = Number(mm), s = Number(ss);
+          if ([h,m,s].some(x => Number.isNaN(x))) return null;
+          return h + m/60 + s/3600;
+        };
+        const deriveHours = (r) => {
+          const th = toNum(r.totalHours);
+          if (th > 0) return th;
+          const ci = hmsToHours(r.checkIn);
+          const co = hmsToHours(r.checkOut);
+          if (ci !== null && co !== null && co >= ci) return +(co - ci).toFixed(2);
+          return 0;
+        };
+        if (!cancelled) {
+          if (presentRows.length === 0) setAvgHoursToday(0);
+          else {
+            const sum = presentRows.reduce((acc, r) => acc + deriveHours(r), 0);
+            const avg = sum / presentRows.length;
+            setAvgHoursToday(avg);
+          }
+        }
+      } catch (err) {
+        if (!cancelled) setAvgHoursToday(null);
+      } finally {
+        if (!cancelled) setAvgHoursLoading(false);
+      }
+    };
+    computeAvgFromAll();
+    return () => { cancelled = true; };
+  }, [user, today, allAttendance]);
   const selfToday = (myAttendance || []).find(r => r.date === today);
   const toHoursDisplay = (hoursWorked, checkIn, checkOut) => {
     const pad2 = (n) => String(n).padStart(2, '0');
@@ -848,7 +900,15 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
   // Summary metrics: Present Today, Absent Today, Late Today (role-aware)
   const activeEmployees = (employees || []).filter(e => (e?.status || 'active') === 'active');
   const todayMy = (myAttendance || []).find(r => r.date === today);
-  const adminTodayPresent = (todayTableData || []).filter(r => r?.date === today && r?.checkIn);
+  // For Admin/HR, compute today's present list from the admin dataset (allAttendance),
+  // not the employee-only table (todayTableData). Treat explicit checkIn or status present/late as present.
+  const adminTodayPresent = (allAttendance || []).filter(r => {
+    const sameDay = String(r?.date) === String(today);
+    const hasCheckIn = !!r?.checkIn;
+    const status = String(r?.status || '').toLowerCase();
+    const statusPresent = status === 'present' || status === 'late';
+    return sameDay && (hasCheckIn || statusPresent);
+  });
   // Prefer backend weekly aggregated data for Admin/HR to keep charts and KPIs consistent
   const weeklyToday = (user?.role === 'admin' || user?.role === 'hr')
     ? (() => {
@@ -866,7 +926,34 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
     : (weeklyToday ? weeklyToday.absent : Math.max(0, activeEmployees.length - presentTodayCount));
   const lateTodayCount = (user?.role === 'employee')
     ? (todayMy?.status === 'late' ? 1 : 0)
-    : (weeklyToday ? weeklyToday.late : (todayTableData || []).filter(r => r?.date === today && r?.status === 'late').length);
+    : (() => {
+        // Compute late arrivals for Admin/HR from admin dataset for today
+        const LATE_THRESHOLD = { h: 9, m: 15, s: 0 };
+        const toSec = (t) => {
+          if (!t || t === '-') return null;
+          const parts = String(t).split(':').map(Number);
+          const [hh = 0, mm = 0, ss = 0] = parts;
+          if ([hh, mm, ss].some((x) => Number.isNaN(x))) return null;
+          return hh * 3600 + mm * 60 + ss;
+        };
+        const lateThresholdSec = LATE_THRESHOLD.h * 3600 + LATE_THRESHOLD.m * 60 + LATE_THRESHOLD.s;
+        const todays = (allAttendance || []).filter(r => String(r?.date) === String(today));
+        const lateUserIds = new Set();
+        for (const r of todays) {
+          const status = String(r?.status || '').toLowerCase();
+          const id = r?.userId || r?.employeeId || r?.Employee?.id || r?.id;
+          if (!id) continue;
+          if (status === 'late') {
+            lateUserIds.add(String(id));
+            continue;
+          }
+          const checkInSec = toSec(r?.checkIn);
+          if (checkInSec !== null && checkInSec > lateThresholdSec) {
+            lateUserIds.add(String(id));
+          }
+        }
+        return lateUserIds.size;
+      })();
 
   // Weekly charts now use backend-provided data in weeklyData
 
@@ -1170,13 +1257,13 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
                 </div>
                 {timerStartTime && (
                   <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                    Started: {(() => {
+                    {/* Started: {(() => {
                       try {
                         return new Date(timerStartTime).toLocaleTimeString();
                       } catch (error) {
                         return 'Invalid time';
                       }
-                    })()}
+                    })()} */}
                   </p>
                 )}
               </div>
@@ -1226,7 +1313,17 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
             <Clock className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-blue-600">{myAttendance?.length ? (Math.round((myAttendance.reduce((acc, r) => acc + (Number(r.hoursWorked) || 0), 0) / myAttendance.length) * 10) / 10) : '-'}</div>
+            <div className="text-2xl font-bold text-blue-600">
+              {(user?.role === 'admin' || user?.role === 'hr')
+                ? (avgHoursLoading
+                    ? '...'
+                    : (avgHoursToday === null
+                        ? '-'
+                        : Math.round(avgHoursToday * 100) / 100))
+                : (myAttendance?.length
+                    ? (Math.round((myAttendance.reduce((acc, r) => acc + (Number(r.hoursWorked) || 0), 0) / myAttendance.length) * 10) / 10)
+                    : '-')}
+            </div>
             <p className="text-xs text-muted-foreground">Hours per day</p>
           </CardContent>
         </Card>
@@ -1615,7 +1712,8 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
                       const key = toKey(curr);
                       const rec = map.get(key);
                       const status = (rec?.status || '').toLowerCase();
-                      const color = status === 'present' ? 'bg-green-500' : status === 'late' ? 'bg-yellow-500' : status === 'absent' ? 'bg-red-500' : '';
+                      // Only show dots for 'present' and 'late'
+                      const color = status === 'present' ? 'bg-green-500' : status === 'late' ? 'bg-yellow-500' : '';
                       const isToday = key === toKey(new Date());
                       // Compute hours text from available fields -> normalize to HH:MM:SS
                       const minutesFrom = (n) => {
@@ -1658,7 +1756,9 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
                         >
                           <div className="text-sm font-medium">{day}</div>
                           <div className="flex justify-center mt-1 h-2">
-                            {status && (<span className={`w-2 h-2 rounded-full ${color}`}></span>)}
+                            {(status === 'present' || status === 'late') && (
+                              <span className={`w-2 h-2 rounded-full ${color}`}></span>
+                            )}
                           </div>
                         </div>
                       );
@@ -1841,14 +1941,14 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
                   <p className="text-gray-900 dark:text-white">Office - Main Building</p>
                 </div>
               </div>
-              <div>
+              {/* <div>
                 <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Notes</label>
                 <div className="mt-2 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
                   <p className="text-gray-900 dark:text-white">
-                    {selectedRecord.status === 'late' ? 'Arrived late due to traffic' : 'Regular attendance'}
+                    {selectedRecord.status === 'late' ? '' : 'Regular attendance'}
                   </p>
                 </div>
-              </div>
+              </div> */}
             </div>
             
             <div className="flex justify-end space-x-3 mt-6">
@@ -1917,7 +2017,7 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
               <div>
                 <label className="block text-sm font-medium mb-1">Export Format</label>
                 <select
-                  className="border rounded px-2 py-1 text-sm bg-white dark:bg-gray-900"
+                  className="border rounded px-2 pr-8 py-1 text-sm bg-white dark:bg-gray-900"
                   value={exportFormat}
                   onChange={(e) => setExportFormat(e.target.value)}
                 >
@@ -2026,7 +2126,14 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
                   >
                     <option value="">Choose an employee...</option>
                     {(employees || [])
-                      .filter(emp => emp?.status === 'active')
+                      .filter(emp => {
+                        const isActive = emp?.status === 'active';
+                        // Filter by department (case-insensitive). Accept various structures
+                        const deptRaw = emp?.department || emp?.Employee?.department || emp?.Department?.name;
+                        const dept = String(deptRaw || '').toLowerCase();
+                        const inEngineering = dept === 'engineering';
+                        return isActive && inEngineering;
+                      })
                       .map(employee => (
                         <option key={employee.id} value={employee.employeeId}>
                           {employee.name} ({employee.employeeId}) - {employee.email}

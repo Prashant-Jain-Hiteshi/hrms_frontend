@@ -152,7 +152,7 @@ const EmployeeDashboard = () => {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{myLeaveBalance}</div>
-            <p className="text-xs text-muted-foreground">Days remaining</p>
+            <p className="text-xs text-muted-foreground">Leaves remaining</p>
           </CardContent>
         </Card>
 
