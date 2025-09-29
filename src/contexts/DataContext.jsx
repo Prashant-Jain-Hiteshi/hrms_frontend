@@ -74,9 +74,17 @@ const DataProvider = ({ children }) => {
     try {
       setDepartmentsLoading(true);
       setDepartmentsError(null);
-      const response = await DepartmentAPI.list();
-      setDepartments(response.data);
-      return response.data;
+      
+      // 🚫 DISABLED: API call temporarily disabled - using mock data only
+      // const response = await DepartmentAPI.list();
+      // setDepartments(response.data);
+      // return response.data;
+      
+      // Always use mock departments (no API call)
+      console.log('📋 Using mock departments data (API disabled)');
+      setDepartments(MOCK_DEPARTMENTS);
+      return MOCK_DEPARTMENTS;
+      
     } catch (error) {
       console.error('Error fetching departments:', error);
       setDepartmentsError(error.message || 'Failed to fetch departments');
@@ -166,8 +174,18 @@ const DataProvider = ({ children }) => {
   
   // Fetch initial data when component mounts
   useEffect(() => {
+    // Skip data loading on authentication pages
+    const authPages = ['/login', '/otp', '/forgot-password'];
+    const currentPath = window.location.pathname;
+    
+    if (authPages.includes(currentPath)) {
+      console.log('🚫 Skipping bulk data loading on auth page:', currentPath);
+      return;
+    }
+    
     const loadInitialData = async () => {
       try {
+        console.log('🚀 Loading initial data for authenticated user...');
         // Load data independently to avoid one failure breaking others
         const promises = [
           fetchEmployees().catch(err => {
@@ -185,7 +203,7 @@ const DataProvider = ({ children }) => {
         ];
         
         await Promise.allSettled(promises);
-        console.log('Initial data loading completed');
+        console.log('✅ Initial data loading completed');
       } catch (error) {
         console.error('Error loading initial data:', error);
       }
@@ -372,11 +390,22 @@ const DataProvider = ({ children }) => {
 
   // Load employees and leave requests from backend on first mount
   useEffect(() => {
+    // Skip data loading on authentication pages
+    const authPages = ['/login', '/otp', '/forgot-password'];
+    const currentPath = window.location.pathname;
+    
+    if (authPages.includes(currentPath)) {
+      console.log('🚫 Skipping leave/employee data loading on auth page:', currentPath);
+      return;
+    }
+    
+    console.log('🚀 Loading leave and employee data...');
     fetchEmployees();
     fetchLeaveRequests();
     fetchLeaveTypes();
     fetchLeaveCreditConfigs();
     fetchPayrolls();
+    console.log('✅ Leave and employee data loading initiated');
   }, []);
 
 
@@ -408,6 +437,16 @@ const DataProvider = ({ children }) => {
   // Load my attendance, summary, and status on auth
   useEffect(() => {
     if (user) {
+      // Skip attendance data loading on authentication pages
+      const authPages = ['/login', '/otp', '/forgot-password'];
+      const currentPath = window.location.pathname;
+      
+      if (authPages.includes(currentPath)) {
+        console.log('🚫 Skipping attendance data loading on auth page:', currentPath);
+        return;
+      }
+      
+      console.log('👤 Loading user-specific attendance data...');
       const from = new Date();
       from.setDate(1);
       fetchMyAttendance({ from: from.toISOString().slice(0, 10) });
@@ -417,6 +456,7 @@ const DataProvider = ({ children }) => {
         const today = new Date().toISOString().slice(0, 10);
         fetchAllAttendance({ from: today, to: today });
       }
+      console.log('✅ User attendance data loading initiated');
     }
   }, [user]);
 
