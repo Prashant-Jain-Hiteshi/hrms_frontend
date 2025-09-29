@@ -3,7 +3,7 @@ import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import OTPInput from '../ui/OTPInput';
 import { Mail, ArrowLeft, Lock, Eye, EyeOff, Clock, RefreshCw, CheckCircle } from 'lucide-react';
-import { toast } from 'react-toastify';
+import { useToast } from '../ui/Toast';
 
 const ForgotPassword = ({ onBack, onSuccess }) => {
   const [step, setStep] = useState('email'); // 'email' | 'otp' | 'password'
@@ -16,6 +16,7 @@ const ForgotPassword = ({ onBack, onSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [resendLoading, setResendLoading] = useState(false);
   const [countdown, setCountdown] = useState(0);
+  const { toast } = useToast();
 
   // Countdown timer for resend OTP
   useEffect(() => {

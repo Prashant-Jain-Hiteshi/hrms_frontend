@@ -8,7 +8,7 @@ import Logo from './ui/Logo';
 import OTPLogin from './Login/OTPLogin';
 import ForgotPassword from './Login/ForgotPassword';
 import { Building2, Mail, Lock, Eye, EyeOff, Users, TrendingUp, Shield, Clock, Smartphone } from 'lucide-react';
-import { toast } from 'react-toastify';
+import { useToast } from './ui/Toast';
 
 const Login = () => {
   const [email, setEmail] = useState('');
@@ -18,6 +18,7 @@ const Login = () => {
   const [loading, setLoading] = useState(false);
   const [currentView, setCurrentView] = useState('login'); // 'login' | 'otp' | 'forgot'
   const { login, isAuthenticated } = useAuth();
+  const { toast } = useToast();
   const navigate = useNavigate();
 
   // Redirect if already authenticated
@@ -234,11 +235,11 @@ const Login = () => {
                       </div>
                     </div>
 
-                    {error && (
+                    {/* {error && (
                       <div className="text-red-600 text-sm bg-red-50 dark:bg-red-900/20 p-3 rounded-md border border-red-200">
                         {error}
                       </div>
-                    )}
+                    )} */}
 
                     <Button type="submit" className="w-full h-12 text-base font-medium" disabled={loading}>
                       {loading ? (

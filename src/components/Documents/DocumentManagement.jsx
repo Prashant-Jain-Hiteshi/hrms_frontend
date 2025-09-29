@@ -754,7 +754,7 @@ const DocumentManagement = () => {
       {selectedTab === 'payslips' && (
         <div className="space-y-6">
           {/* Month Filter */}
-          <Card>
+          {/* <Card>
             <CardContent className="pt-6">
               <div className="flex flex-col md:flex-row gap-4 items-center">
                 <div className="flex items-center space-x-2">
@@ -784,7 +784,7 @@ const DocumentManagement = () => {
                 </Button>
               </div>
             </CardContent>
-          </Card>
+          </Card> */}
 
           {/* Payslips Table */}
           <Card>
