@@ -14,12 +14,14 @@ import { useData } from '../../contexts/DataContext';
 import PayrollProgressChart from './PayrollProgressChart';
 import { PayrollSetupAPI } from '../../lib/payrollSetupApi';
 import { HRPayrollAPI } from '../../lib/hrPayrollApi';
-import { toast } from 'react-toastify';
+import { useToast } from '../ui/Toast';
 import CompanyPayrollInfo from './CompanyPayrollInfo';
 import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
 
 const PayrollManagement = () => {
   const { user } = useAuth();
+  const { toast } = useToast();
   const { 
     employees, 
     payrolls, 
@@ -428,6 +430,13 @@ const PayrollManagement = () => {
   useEffect(() => {
     if (selectedTab === 'setup') {
       loadSetupData();
+    }
+  }, [selectedTab]);
+
+  // Load tax config data when tax compliance tab is selected
+  useEffect(() => {
+    if (selectedTab === 'taxcompliance') {
+      loadTaxConfigData();
     }
   }, [selectedTab]);
 
@@ -978,10 +987,34 @@ const loadHRPayrollData = async () => {
     }
   };
 
+  const handleTaxConfigChange = (field, value) => {
+    setTaxConfigData({...taxConfigData, [field]: value});
+    // Clear error when user starts typing
+    if (taxConfigErrors[field]) {
+      setTaxConfigErrors(prev => ({...prev, [field]: ''}));
+    }
+  };
+
   const validateTaxConfigForm = () => {
     const errors = {};
     
-    // Basic validation - all fields are optional, but if provided must be valid numbers
+    // Required field validation
+    const requiredFields = {
+      'pfMinimumSalary': 'PF Minimum Salary is required',
+      'pfEmployeeRate': 'PF Employee Rate is required',
+      'esiMinimumSalary': 'ESI Minimum Salary is required', 
+      'esiEmployeeRate': 'ESI Employee Rate is required',
+      'professionalTaxAmount': 'Professional Tax Amount is required'
+    };
+    
+    Object.keys(requiredFields).forEach(field => {
+      const value = taxConfigData[field];
+      if (!value || value.toString().trim() === '') {
+        errors[field] = requiredFields[field];
+      }
+    });
+    
+    // Numeric validation - all fields must be valid numbers if provided
     const numericFields = [
       'pfMinimumSalary', 'pfEmployeeRate', 'pfEmployerRate',
       'esiMinimumSalary', 'esiEmployeeRate', 'esiEmployerRate',
@@ -990,7 +1023,7 @@ const loadHRPayrollData = async () => {
     
     numericFields.forEach(field => {
       const value = taxConfigData[field];
-      if (value !== '' && (isNaN(value) || Number(value) < 0)) {
+      if (value !== '' && !errors[field] && (isNaN(value) || Number(value) < 0)) {
         errors[field] = 'Must be a valid positive number';
       }
     });
@@ -999,7 +1032,7 @@ const loadHRPayrollData = async () => {
     const percentageFields = ['pfEmployeeRate', 'pfEmployerRate', 'esiEmployeeRate', 'esiEmployerRate'];
     percentageFields.forEach(field => {
       const value = taxConfigData[field];
-      if (value !== '' && Number(value) > 100) {
+      if (value !== '' && !errors[field] && Number(value) > 100) {
         errors[field] = 'Percentage cannot exceed 100%';
       }
     });
@@ -1079,6 +1112,40 @@ const loadHRPayrollData = async () => {
     }
     setFormErrors(errors);
     return Object.keys(errors).length === 0;
+  };
+
+  const handleComponentSubmit = async (e) => {
+    e.preventDefault();
+    
+    if (!validateComponentForm()) {
+      return;
+    }
+
+    setSetupLoading(true);
+    try {
+      const formData = {
+        ...componentForm,
+        calculationMethod: 'FIXED',
+        value: parseFloat(componentForm.value)
+      };
+
+      if (selectedComponent) {
+        await PayrollSetupAPI.updatePayComponent(selectedComponent.id, formData);
+        toast.success('Component updated successfully');
+      } else {
+        await PayrollSetupAPI.createPayComponent(formData);
+        toast.success('Component created successfully');
+      }
+
+      setShowComponentModal(false);
+      resetComponentForm();
+      loadSetupData();
+    } catch (error) {
+      console.error('Error saving component:', error);
+      toast.error(error.response?.data?.message || 'Failed to save component');
+    } finally {
+      setSetupLoading(false);
+    }
   };
 
   const triggerMonthlyCredits = async () => {
@@ -1289,6 +1356,212 @@ const loadHRPayrollData = async () => {
     }
   };
 
+  // Generate Professional PDF Payslip
+  const generatePayslipPDF = (receiptData) => {
+    try {
+      const doc = new jsPDF();
+      
+      // Colors
+      const primaryColor = [41, 128, 185]; // Blue
+      const secondaryColor = [52, 73, 94]; // Dark Gray
+      const accentColor = [39, 174, 96]; // Green
+      const lightGray = [236, 240, 241];
+      
+      // Header Background
+      doc.setFillColor(...primaryColor);
+      doc.rect(0, 0, 210, 35, 'F');
+      
+      // Company Name
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(24);
+      doc.setFont('helvetica', 'bold');
+      doc.text('HITESHI INFOTECH', 105, 15, { align: 'center' });
+      
+      // Payslip Title
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'normal');
+      doc.text('SALARY SLIP', 105, 25, { align: 'center' });
+      
+      // Reset text color
+      doc.setTextColor(0, 0, 0);
+      
+      // Month Badge
+      doc.setFillColor(...accentColor);
+      doc.roundedRect(70, 40, 70, 12, 3, 3, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(11);
+      doc.setFont('helvetica', 'bold');
+      doc.text(`${receiptData.month}`, 105, 48, { align: 'center' });
+      
+      // Reset text color
+      doc.setTextColor(0, 0, 0);
+      
+      // Employee Information Card
+      let yPos = 65;
+      doc.setFillColor(...lightGray);
+      doc.roundedRect(15, yPos - 5, 180, 45, 3, 3, 'F');
+      
+      // Employee Info Header
+      doc.setTextColor(...secondaryColor);
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'bold');
+      doc.text('EMPLOYEE INFORMATION', 20, yPos + 5);
+      
+      // Employee Details - Two Column Layout
+      doc.setTextColor(0, 0, 0);
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      
+      yPos += 15;
+      // Row 1: Employee ID and Designation
+      doc.setFont('helvetica', 'bold');
+      doc.text('Employee ID:', 20, yPos);
+      doc.setFont('helvetica', 'normal');
+      doc.text(receiptData.employee.id, 75, yPos);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Designation:', 110, yPos);
+      doc.setFont('helvetica', 'normal');
+      doc.text(receiptData.employee.designation, 165, yPos);
+      
+      yPos += 8;
+      // Row 2: Name and Working Days
+      doc.setFont('helvetica', 'bold');
+      doc.text('Name:', 20, yPos);
+      doc.setFont('helvetica', 'normal');
+      doc.text(receiptData.employee.name, 75, yPos);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Working Days:', 110, yPos);
+      doc.setFont('helvetica', 'normal');
+      doc.text(String(receiptData.salary.workingDays), 165, yPos);
+      
+      yPos += 8;
+      // Row 3: Department and Paid Days
+      doc.setFont('helvetica', 'bold');
+      doc.text('Department:', 20, yPos);
+      doc.setFont('helvetica', 'normal');
+      doc.text(receiptData.employee.department, 75, yPos);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Paid Days:', 110, yPos);
+      doc.setFont('helvetica', 'normal');
+      doc.text(String(receiptData.salary.paidDays), 165, yPos);
+      
+      // Salary Breakdown Section
+      yPos = 130;
+      doc.setTextColor(...secondaryColor);
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'bold');
+      doc.text('SALARY BREAKDOWN', 20, yPos);
+      
+      // Salary Table Header
+      yPos += 15;
+      doc.setFillColor(...primaryColor);
+      doc.rect(15, yPos - 5, 180, 12, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(11);
+      doc.setFont('helvetica', 'bold');
+      doc.text('DESCRIPTION', 20, yPos + 2);
+      doc.text('AMOUNT (₹)', 175, yPos + 2, { align: 'right' });
+      
+      // Reset colors
+      doc.setTextColor(0, 0, 0);
+      doc.setFontSize(10);
+      
+      // Basic Salary Row
+      yPos += 15;
+      doc.setFillColor(250, 250, 250);
+      doc.rect(15, yPos - 5, 180, 10, 'F');
+      doc.setFont('helvetica', 'normal');
+      doc.text('Basic Salary', 20, yPos);
+      doc.text(Number(receiptData.salary.basicSalary || 0).toLocaleString(), 175, yPos, { align: 'right' });
+      
+      // Allowances Row
+      yPos += 12;
+      doc.setFont('helvetica', 'normal');
+      doc.text('Allowances', 20, yPos);
+      doc.setTextColor(...accentColor);
+      doc.text(`+${Number(receiptData.salary.allowances || 0).toLocaleString()}`, 175, yPos, { align: 'right' });
+      
+      // Gross Salary Row
+      yPos += 12;
+      doc.setFillColor(240, 248, 255);
+      doc.rect(15, yPos - 5, 180, 10, 'F');
+      doc.setTextColor(0, 0, 0);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Gross Salary', 20, yPos);
+      doc.text(Number(receiptData.salary.grossSalary || 0).toLocaleString(), 175, yPos, { align: 'right' });
+      
+      // Deductions Row
+      yPos += 12;
+      doc.setFont('helvetica', 'normal');
+      doc.text('Total Deductions', 20, yPos);
+      doc.setTextColor(231, 76, 60); // Red
+      doc.text(`-${Number(receiptData.salary.deductions || 0).toLocaleString()}`, 175, yPos, { align: 'right' });
+      
+      // Net Salary Section (Highlighted)
+      yPos += 20;
+      doc.setFillColor(...accentColor);
+      doc.roundedRect(15, yPos - 8, 180, 20, 5, 5, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'bold');
+      doc.text('NET SALARY', 20, yPos);
+      doc.setFontSize(16);
+      doc.text(`₹${Number(receiptData.salary.netSalary || 0).toLocaleString()}`, 175, yPos, { align: 'right' });
+      
+      // Bank Transfer Details (if available)
+      if (receiptData.transferId && !receiptData.transferId.startsWith('HR-')) {
+        yPos += 35;
+        doc.setTextColor(...secondaryColor);
+        doc.setFontSize(12);
+        doc.setFont('helvetica', 'bold');
+        doc.text('BANK TRANSFER DETAILS', 20, yPos);
+        
+        yPos += 15;
+        doc.setTextColor(0, 0, 0);
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'normal');
+        
+        // Transfer info in a box
+        doc.setFillColor(248, 249, 250);
+        doc.roundedRect(15, yPos - 5, 180, 25, 3, 3, 'F');
+        
+        doc.text(`Transaction ID: ${receiptData.transferId}`, 20, yPos + 2);
+        doc.text(`Transfer Date: ${new Date(receiptData.transferDate).toLocaleDateString()}`, 20, yPos + 10);
+        doc.text(`Status: ${receiptData.transferStatus}`, 110, yPos + 2);
+        doc.text(`Method: ${receiptData.transferMethod}`, 110, yPos + 10);
+      }
+      
+      // Footer
+      yPos = 270;
+      doc.setDrawColor(200, 200, 200);
+      doc.line(15, yPos, 195, yPos);
+      
+      yPos += 10;
+      doc.setTextColor(128, 128, 128);
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'normal');
+      doc.text('This is a system-generated payslip. No signature required.', 20, yPos);
+      doc.text(`Generated on: ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}`, 20, yPos + 6);
+      
+      // Company footer
+      doc.setTextColor(...primaryColor);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Hiteshi Infotech - HR Management System', 105, yPos + 15, { align: 'center' });
+      
+      // Generate filename
+      const fileName = `Payslip_${receiptData.employee.name.replace(/\s+/g, '_')}_${receiptData.month}.pdf`;
+      
+      // Download the PDF
+      doc.save(fileName);
+      
+      toast.success('Professional payslip downloaded successfully!');
+      
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+      toast.error('Failed to generate payslip PDF');
+    }
+  };
+
   // Handle opening calculate modal
   const handleOpenCalculateModal = () => {
     setShowCalculateModal(true);
@@ -1405,8 +1678,75 @@ const loadHRPayrollData = async () => {
     emp.department.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  // Generate HR Payslip using payroll record data directly
+  const generateHRPayslip = async (payrollRecord) => {
+    try {
+      // Only allow for FINANCE APPROVED records
+      if (payrollRecord.status !== 'FINANCE_APPROVED') {
+        toast.error('Payslip is only available for Finance approved records');
+        return;
+      }
+
+      setHrPayrollLoading(true);
+      
+      console.log('🔍 Generating HR payslip for:', payrollRecord);
+      
+      // Create receipt-like data structure from payroll record
+      const receiptData = {
+        transferId: `HR-${payrollRecord.id}`,
+        transferDate: new Date(),
+        transferStatus: 'COMPLETED',
+        month: payrollMonth,
+        transferMethod: 'NEFT',
+        
+        employee: {
+          id: payrollRecord.employee?.employeeId || payrollRecord.employeeId,
+          name: payrollRecord.employee?.name || 'Unknown',
+          department: payrollRecord.employee?.department || 'N/A',
+          designation: payrollRecord.employee?.designation || 'N/A',
+          email: payrollRecord.employee?.email || 'N/A'
+        },
+        
+        salary: {
+          basicSalary: payrollRecord.baseSalary,
+          allowances: payrollRecord.totalAllowances,
+          deductions: payrollRecord.totalDeductions,
+          allowancesBreakdown: payrollRecord.allowances,
+          deductionsBreakdown: payrollRecord.deductions,
+          grossSalary: payrollRecord.grossSalary,
+          netSalary: payrollRecord.netSalary,
+          workingDays: payrollRecord.workingDays,
+          paidDays: payrollRecord.paidDays,
+          lwpDays: payrollRecord.unpaidDays || 0
+        },
+        
+        recipientBank: {
+          bankName: 'Bank Details Not Available',
+          accountNumber: '****0000',
+          ifscCode: 'N/A',
+          accountHolderName: payrollRecord.employee?.name || 'Unknown',
+          branchName: 'N/A'
+        },
+        
+        transferAmount: payrollRecord.netSalary,
+        generatedAt: new Date().toISOString()
+      };
+      
+      console.log('✅ Receipt data created for HR payslip:', receiptData);
+      
+      // Use the same PDF generation function as Finance
+      generatePayslipPDF(receiptData);
+      
+    } catch (error) {
+      console.error('❌ Error generating HR payslip:', error);
+      toast.error('Failed to generate payslip. Please try again.');
+    } finally {
+      setHrPayrollLoading(false);
+    }
+  };
+
   const generatePayslip = (employee) => {
-    // In a real app, this would generate a PDF
+    // Legacy function - keeping for compatibility
     console.log(`Payslip generated for ${employee.name}`);
   };
 
@@ -1513,6 +1853,8 @@ const loadHRPayrollData = async () => {
             ? ['overview', 'payroll'] 
             : user?.role === 'finance'
             ? ['overview', 'finance', 'banktransfers']
+            : user?.role === 'admin'
+            ? ['overview',  'setup', 'templates', 'settings', 'taxcompliance']
             : ['overview', 'payroll', 'setup', 'templates', 'settings', 'taxcompliance', 'reimbursements']
           ).map((tab) => (
             <button
@@ -1857,8 +2199,10 @@ const loadHRPayrollData = async () => {
                                 <Button 
                                   size="sm" 
                                   variant="outline"
-                                  onClick={() => generatePayslip(record)}
-                                  className="flex items-center space-x-1"
+                                  onClick={() => generateHRPayslip(record)}
+                                  disabled={record.status !== 'FINANCE_APPROVED'}
+                                  title={record.status !== 'FINANCE_APPROVED' ? 'Not Approved by Finance' : 'Download Payslip'}
+                                  className={`flex items-center space-x-1 ${record.status !== 'FINANCE_APPROVED' ? 'opacity-50 cursor-not-allowed' : ''}`}
                                 >
                                   <FileText className="h-3 w-3" />
                                   <span>Payslip</span>
@@ -2603,7 +2947,7 @@ const loadHRPayrollData = async () => {
                           min="0"
                           step="1"
                           value={taxConfigData.pfMinimumSalary}
-                          onChange={(e) => setTaxConfigData({...taxConfigData, pfMinimumSalary: e.target.value})}
+                          onChange={(e) => handleTaxConfigChange('pfMinimumSalary', e.target.value)}
                           placeholder="e.g., 10000"
                           className={taxConfigErrors.pfMinimumSalary ? 'border-red-500' : ''}
                         />
@@ -2621,7 +2965,7 @@ const loadHRPayrollData = async () => {
                           max="100"
                           step="0.01"
                           value={taxConfigData.pfEmployeeRate}
-                          onChange={(e) => setTaxConfigData({...taxConfigData, pfEmployeeRate: e.target.value})}
+                          onChange={(e) => handleTaxConfigChange('pfEmployeeRate', e.target.value)}
                           placeholder="e.g., 12"
                           className={taxConfigErrors.pfEmployeeRate ? 'border-red-500' : ''}
                         />
@@ -2648,7 +2992,7 @@ const loadHRPayrollData = async () => {
                           min="0"
                           step="1"
                           value={taxConfigData.esiMinimumSalary}
-                          onChange={(e) => setTaxConfigData({...taxConfigData, esiMinimumSalary: e.target.value})}
+                          onChange={(e) => handleTaxConfigChange('esiMinimumSalary', e.target.value)}
                           placeholder="e.g., 21000"
                           className={taxConfigErrors.esiMinimumSalary ? 'border-red-500' : ''}
                         />
@@ -2666,7 +3010,7 @@ const loadHRPayrollData = async () => {
                           max="100"
                           step="0.01"
                           value={taxConfigData.esiEmployeeRate}
-                          onChange={(e) => setTaxConfigData({...taxConfigData, esiEmployeeRate: e.target.value})}
+                          onChange={(e) => handleTaxConfigChange('esiEmployeeRate', e.target.value)}
                           placeholder="e.g., 0.75"
                           className={taxConfigErrors.esiEmployeeRate ? 'border-red-500' : ''}
                         />
@@ -2693,7 +3037,7 @@ const loadHRPayrollData = async () => {
                           min="0"
                           step="1"
                           value={taxConfigData.professionalTaxAmount}
-                          onChange={(e) => setTaxConfigData({...taxConfigData, professionalTaxAmount: e.target.value})}
+                          onChange={(e) => handleTaxConfigChange('professionalTaxAmount', e.target.value)}
                           placeholder="e.g., 200"
                           className={taxConfigErrors.professionalTaxAmount ? 'border-red-500' : ''}
                         />
@@ -2710,7 +3054,7 @@ const loadHRPayrollData = async () => {
                           min="0"
                           step="1"
                           value={taxConfigData.professionalTaxMinimumSalary}
-                          onChange={(e) => setTaxConfigData({...taxConfigData, professionalTaxMinimumSalary: e.target.value})}
+                          onChange={(e) => handleTaxConfigChange('professionalTaxMinimumSalary', e.target.value)}
                           placeholder="e.g., 10000"
                           className={taxConfigErrors.professionalTaxMinimumSalary ? 'border-red-500' : ''}
                         />
@@ -2736,7 +3080,7 @@ const loadHRPayrollData = async () => {
                           min="0"
                           step="1"
                           value={taxConfigData.tdsExemptionLimit}
-                          onChange={(e) => setTaxConfigData({...taxConfigData, tdsExemptionLimit: e.target.value})}
+                          onChange={(e) => handleTaxConfigChange('tdsExemptionLimit', e.target.value)}
                           placeholder="e.g., 250000"
                           className={taxConfigErrors.tdsExemptionLimit ? 'border-red-500' : ''}
                         />
@@ -2760,7 +3104,7 @@ const loadHRPayrollData = async () => {
                         className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:ring-2 focus:ring-primary focus:border-transparent"
                         rows="3"
                         value={taxConfigData.notes}
-                        onChange={(e) => setTaxConfigData({...taxConfigData, notes: e.target.value})}
+                        onChange={(e) => handleTaxConfigChange('notes', e.target.value)}
                         placeholder="Optional notes about tax configuration, compliance requirements, or special considerations..."
                       />
                     </div>
@@ -4195,10 +4539,10 @@ const loadHRPayrollData = async () => {
                 <div className="flex space-x-3">
                   <Button 
                     variant="outline"
-                    onClick={() => window.print()}
+                    onClick={() => generatePayslipPDF(bankReceiptData)}
                   >
                     <FileText className="h-4 w-4 mr-2" />
-                    Print
+                    Download Payslip
                   </Button>
                   <Button 
                     onClick={() => {

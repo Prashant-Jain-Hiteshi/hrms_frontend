@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
-import { Users, Clock, Timer, Search, Filter, CheckCircle, XCircle, Eye, Download, Calendar, Plus, User, Save, X, Play, Pause } from 'lucide-react';
+import { Users, Clock, Timer, Search, Filter, CheckCircle, XCircle, Eye, Download, Calendar, Plus, User, Save, X, Play, Pause, AlertCircle } from 'lucide-react';
  
 import { useAuth } from '../../contexts/AuthContext';
 import { useData } from '../../contexts/DataContext';
@@ -65,6 +65,20 @@ const AttendanceManagement = () => {
   const [showDateDetailsModal, setShowDateDetailsModal] = useState(false);
   const [selectedDateDetails, setSelectedDateDetails] = useState(null);
   const [dateDetailsLoading, setDateDetailsLoading] = useState(false);
+
+  // Toast Notifications State
+  const [notifications, setNotifications] = useState([]);
+
+  // Toast notification helper
+  const notify = ({ type = 'info', message = '', timeout = 3000 }) => {
+    const id = `${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
+    setNotifications((prev) => [...prev, { id, type, message }]);
+    if (timeout > 0) {
+      setTimeout(() => {
+        setNotifications((prev) => prev.filter((n) => n.id !== id));
+      }, timeout);
+    }
+  };
 
   // Work Duration Timer State
   const [workDuration, setWorkDuration] = useState('00:00:00');
@@ -578,17 +592,34 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
   // Separate state variables for Monthly Calendar data
   const [calendarData, setCalendarData] = useState([]);
   const [calendarLoading, setCalendarLoading] = useState(false);
+  // Avg hours (today) for admin/hr from backend
+  const [avgHoursToday, setAvgHoursToday] = useState(null);
+  const [avgHoursLoading, setAvgHoursLoading] = useState(false);
 
   const adminBackendDate = () => {
-    if (adminType === 'daily') return adminPicker; // yyyy-mm-dd
-    // if picker is like yyyy-mm (from <input type="month">), normalize to first day
-    if (/^\d{4}-\d{2}$/.test(adminPicker)) return `${adminPicker}-01`;
-    // else assume full date string; convert to first-of-month
-    try {
-      const d = new Date(adminPicker);
-      if (!isNaN(d.getTime())) return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10);
-    } catch {}
-    return new Date().toISOString().slice(0, 10);
+    if (adminType === 'daily') {
+      // For daily, ensure we have a valid date format
+      if (/^\d{4}-\d{2}-\d{2}$/.test(adminPicker)) {
+        return adminPicker;
+      }
+      // Fallback to today's date
+      return new Date().toISOString().slice(0, 10);
+    }
+    
+    // For monthly type
+    if (/^\d{4}-\d{2}$/.test(adminPicker)) {
+      // Month format (YYYY-MM) -> convert to first day of month
+      return `${adminPicker}-01`;
+    }
+    
+    // If we have a full date, extract the month and convert to first day
+    if (/^\d{4}-\d{2}-\d{2}$/.test(adminPicker)) {
+      return `${adminPicker.slice(0, 7)}-01`;
+    }
+    
+    // Fallback to current month's first day
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    return `${currentMonth}-01`;
   };
 
   // Dedicated API function for Employee Today's Attendance table ONLY
@@ -654,15 +685,11 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
         const last = new Date(selectedYear, selectedMonth + 1, 0);
         const from = first.toISOString().slice(0, 10);
         const to = last.toISOString().slice(0, 10);
-        
-        // Call API directly and store in separate calendar state
-        const response = await AttendanceAPI.getMyAttendance({ from, to });
-        setCalendarData(response || []);
-        
-        // Calculate totals from the calendar data
-        setTimeout(() => {
-          calculateTotalsFromCalendarData(response || []);
-        }, 100);
+
+        // Correct API and response handling
+        const res = await AttendanceAPI.my({ from, to });
+        const rows = Array.isArray(res?.data) ? res.data : (Array.isArray(res?.data?.rows) ? res.data.rows : []);
+        setCalendarData(rows);
       } else {
         // For admin/HR, fetch all attendance data for the calendar
         const calendarDate = calendarType === 'monthly' ? `${calendarPicker}-01` : calendarPicker;
@@ -678,9 +705,6 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
         // Call API directly and store in separate calendar state
         const response = await AttendanceAPI.getAllAttendance(params);
         setCalendarData(response || []);
-        setTimeout(() => {
-          calculateTotalsFromCalendarData(response || []);
-        }, 100);
       }
     } catch (error) {
       console.error('Error fetching calendar data:', error);
@@ -713,6 +737,62 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [calendarType, calendarPicker, calendarStatus, selectedMonth, selectedYear, user]);
+
+  // Admin/HR Avg Hours (today): ALWAYS compute from allAttendance for today
+  useEffect(() => {
+    const isAdminOrHr = user?.role === 'admin' || user?.role === 'hr';
+    if (!isAdminOrHr) {
+      setAvgHoursToday(null);
+      return;
+    }
+    let cancelled = false;
+    const computeAvgFromAll = () => {
+      try {
+        const rows = (allAttendance || [])
+          .filter(r => String(r?.date) === String(today))
+          .map(r => ({
+            status: r?.status,
+            checkIn: r?.checkIn,
+            checkOut: r?.checkOut,
+            totalHours: r?.hoursWorked,
+          }));
+        const presentRows = rows.filter((r) => {
+          const s = String(r?.status || '').toLowerCase();
+          return s === 'present' || s === 'late' || !!r?.checkIn;
+        });
+        const toNum = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+        const hmsToHours = (t) => {
+          if (!t || typeof t !== 'string' || !/^\d{1,2}:\d{2}(:\d{2})?$/.test(t)) return null;
+          const [hh, mm, ss = '0'] = t.split(':');
+          const h = Number(hh), m = Number(mm), s = Number(ss);
+          if ([h,m,s].some(x => Number.isNaN(x))) return null;
+          return h + m/60 + s/3600;
+        };
+        const deriveHours = (r) => {
+          const th = toNum(r.totalHours);
+          if (th > 0) return th;
+          const ci = hmsToHours(r.checkIn);
+          const co = hmsToHours(r.checkOut);
+          if (ci !== null && co !== null && co >= ci) return +(co - ci).toFixed(2);
+          return 0;
+        };
+        if (!cancelled) {
+          if (presentRows.length === 0) setAvgHoursToday(0);
+          else {
+            const sum = presentRows.reduce((acc, r) => acc + deriveHours(r), 0);
+            const avg = sum / presentRows.length;
+            setAvgHoursToday(avg);
+          }
+        }
+      } catch (err) {
+        if (!cancelled) setAvgHoursToday(null);
+      } finally {
+        if (!cancelled) setAvgHoursLoading(false);
+      }
+    };
+    computeAvgFromAll();
+    return () => { cancelled = true; };
+  }, [user, today, allAttendance]);
   const selfToday = (myAttendance || []).find(r => r.date === today);
   const toHoursDisplay = (hoursWorked, checkIn, checkOut) => {
     const pad2 = (n) => String(n).padStart(2, '0');
@@ -848,7 +928,15 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
   // Summary metrics: Present Today, Absent Today, Late Today (role-aware)
   const activeEmployees = (employees || []).filter(e => (e?.status || 'active') === 'active');
   const todayMy = (myAttendance || []).find(r => r.date === today);
-  const adminTodayPresent = (todayTableData || []).filter(r => r?.date === today && r?.checkIn);
+  // For Admin/HR, compute today's present list from the admin dataset (allAttendance),
+  // not the employee-only table (todayTableData). Treat explicit checkIn or status present/late as present.
+  const adminTodayPresent = (allAttendance || []).filter(r => {
+    const sameDay = String(r?.date) === String(today);
+    const hasCheckIn = !!r?.checkIn;
+    const status = String(r?.status || '').toLowerCase();
+    const statusPresent = status === 'present' || status === 'late';
+    return sameDay && (hasCheckIn || statusPresent);
+  });
   // Prefer backend weekly aggregated data for Admin/HR to keep charts and KPIs consistent
   const weeklyToday = (user?.role === 'admin' || user?.role === 'hr')
     ? (() => {
@@ -866,7 +954,34 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
     : (weeklyToday ? weeklyToday.absent : Math.max(0, activeEmployees.length - presentTodayCount));
   const lateTodayCount = (user?.role === 'employee')
     ? (todayMy?.status === 'late' ? 1 : 0)
-    : (weeklyToday ? weeklyToday.late : (todayTableData || []).filter(r => r?.date === today && r?.status === 'late').length);
+    : (() => {
+        // Compute late arrivals for Admin/HR from admin dataset for today
+        const LATE_THRESHOLD = { h: 9, m: 15, s: 0 };
+        const toSec = (t) => {
+          if (!t || t === '-') return null;
+          const parts = String(t).split(':').map(Number);
+          const [hh = 0, mm = 0, ss = 0] = parts;
+          if ([hh, mm, ss].some((x) => Number.isNaN(x))) return null;
+          return hh * 3600 + mm * 60 + ss;
+        };
+        const lateThresholdSec = LATE_THRESHOLD.h * 3600 + LATE_THRESHOLD.m * 60 + LATE_THRESHOLD.s;
+        const todays = (allAttendance || []).filter(r => String(r?.date) === String(today));
+        const lateUserIds = new Set();
+        for (const r of todays) {
+          const status = String(r?.status || '').toLowerCase();
+          const id = r?.userId || r?.employeeId || r?.Employee?.id || r?.id;
+          if (!id) continue;
+          if (status === 'late') {
+            lateUserIds.add(String(id));
+            continue;
+          }
+          const checkInSec = toSec(r?.checkIn);
+          if (checkInSec !== null && checkInSec > lateThresholdSec) {
+            lateUserIds.add(String(id));
+          }
+        }
+        return lateUserIds.size;
+      })();
 
   // Weekly charts now use backend-provided data in weeklyData
 
@@ -984,6 +1099,14 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
       // Call API to add attendance (we'll need to add this endpoint)
       await AttendanceAPI.addEmployeeAttendance(attendanceData);
 
+      // Show success notification
+      const selectedEmployee = employees.find(emp => emp.id === parseInt(employeeId));
+      const employeeName = selectedEmployee?.name || 'Employee';
+      notify({ 
+        type: 'success', 
+        message: `Attendance added successfully for ${employeeName} on ${date}!` 
+      });
+
       // Refresh attendance data
       if (fetchAllAttendance) {
         await fetchAllAttendance();
@@ -1002,14 +1125,17 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
       });
       setShowAddAttendanceModal(false);
       
-      console.log('Employee attendance added successfully!');
-      
     } catch (error) {
       console.error('Error adding employee attendance:', error);
-      setAddAttendanceError(
-        error.response?.data?.message || 
-        'Failed to add employee attendance. Please try again.'
-      );
+      const errorMessage = error.response?.data?.message || 'Failed to add employee attendance. Please try again.';
+      
+      // Show error notification
+      notify({ 
+        type: 'error', 
+        message: errorMessage 
+      });
+      
+      setAddAttendanceError(errorMessage);
     } finally {
       setIsAddingAttendance(false);
     }
@@ -1017,6 +1143,33 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
 
   return (
     <div className="space-y-6">
+      {/* Toast Notifications */}
+      <div className="fixed top-4 right-4 z-50 space-y-3">
+        {notifications.map((n) => (
+          <div
+            key={n.id}
+            className={`flex items-start gap-3 px-4 py-3 rounded-lg shadow-lg border text-sm transition-all duration-200 ${
+              n.type === 'success'
+                ? 'bg-green-50 border-green-200 text-green-800 dark:bg-green-900/20 dark:text-green-300 dark:border-green-800'
+                : n.type === 'error'
+                ? 'bg-red-50 border-red-200 text-red-800 dark:bg-red-900/20 dark:text-red-300 dark:border-red-800'
+                : 'bg-blue-50 border-blue-200 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300 dark:border-blue-800'
+            }`}
+          >
+            <div className="mt-0.5">
+              {n.type === 'success' ? <CheckCircle className="h-4 w-4" /> : n.type === 'error' ? <AlertCircle className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </div>
+            <div className="flex-1">{n.message}</div>
+            <button
+              className="text-xs opacity-70 hover:opacity-100"
+              onClick={() => setNotifications((prev) => prev.filter((x) => x.id !== n.id))}
+            >
+              Dismiss
+            </button>
+          </div>
+        ))}
+      </div>
+      
       {/* Header */}
       <div className="flex justify-between items-center">
         <div>
@@ -1170,13 +1323,13 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
                 </div>
                 {timerStartTime && (
                   <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                    Started: {(() => {
+                    {/* Started: {(() => {
                       try {
                         return new Date(timerStartTime).toLocaleTimeString();
                       } catch (error) {
                         return 'Invalid time';
                       }
-                    })()}
+                    })()} */}
                   </p>
                 )}
               </div>
@@ -1226,7 +1379,17 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
             <Clock className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-blue-600">{myAttendance?.length ? (Math.round((myAttendance.reduce((acc, r) => acc + (Number(r.hoursWorked) || 0), 0) / myAttendance.length) * 10) / 10) : '-'}</div>
+            <div className="text-2xl font-bold text-blue-600">
+              {(user?.role === 'admin' || user?.role === 'hr')
+                ? (avgHoursLoading
+                    ? '...'
+                    : (avgHoursToday === null
+                        ? '-'
+                        : Math.round(avgHoursToday * 100) / 100))
+                : (myAttendance?.length
+                    ? (Math.round((myAttendance.reduce((acc, r) => acc + (Number(r.hoursWorked) || 0), 0) / myAttendance.length) * 10) / 10)
+                    : '-')}
+            </div>
             <p className="text-xs text-muted-foreground">Hours per day</p>
           </CardContent>
         </Card>
@@ -1312,12 +1475,24 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
                   <label className="text-sm">Type:</label>
                   <button
                     className={`px-2 py-1 text-sm rounded border ${adminType === 'daily' ? 'bg-primary text-white' : 'bg-transparent'}`}
-                    onClick={() => setAdminType('daily')}
+                    onClick={() => {
+                      setAdminType('daily');
+                      // When switching to daily, ensure we have a full date
+                      if (!/^\d{4}-\d{2}-\d{2}$/.test(adminPicker)) {
+                        const currentDate = new Date().toISOString().slice(0, 10);
+                        setAdminPicker(currentDate);
+                      }
+                    }}
                     type="button"
                   >Daily</button>
                   <button
                     className={`px-2 py-1 text-sm rounded border ${adminType === 'monthly' ? 'bg-primary text-white' : 'bg-transparent'}`}
-                    onClick={() => setAdminType('monthly')}
+                    onClick={() => {
+                      setAdminType('monthly');
+                      // When switching to monthly, convert current date to month format
+                      const currentMonth = new Date().toISOString().slice(0, 7);
+                      setAdminPicker(currentMonth);
+                    }}
                     type="button"
                   >Monthly</button>
                 </div>
@@ -1615,7 +1790,8 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
                       const key = toKey(curr);
                       const rec = map.get(key);
                       const status = (rec?.status || '').toLowerCase();
-                      const color = status === 'present' ? 'bg-green-500' : status === 'late' ? 'bg-yellow-500' : status === 'absent' ? 'bg-red-500' : '';
+                      // Only show dots for 'present' and 'late'
+                      const color = status === 'present' ? 'bg-green-500' : status === 'late' ? 'bg-yellow-500' : '';
                       const isToday = key === toKey(new Date());
                       // Compute hours text from available fields -> normalize to HH:MM:SS
                       const minutesFrom = (n) => {
@@ -1658,7 +1834,9 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
                         >
                           <div className="text-sm font-medium">{day}</div>
                           <div className="flex justify-center mt-1 h-2">
-                            {status && (<span className={`w-2 h-2 rounded-full ${color}`}></span>)}
+                            {(status === 'present' || status === 'late') && (
+                              <span className={`w-2 h-2 rounded-full ${color}`}></span>
+                            )}
                           </div>
                         </div>
                       );
@@ -1841,14 +2019,14 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
                   <p className="text-gray-900 dark:text-white">Office - Main Building</p>
                 </div>
               </div>
-              <div>
+              {/* <div>
                 <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Notes</label>
                 <div className="mt-2 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
                   <p className="text-gray-900 dark:text-white">
-                    {selectedRecord.status === 'late' ? 'Arrived late due to traffic' : 'Regular attendance'}
+                    {selectedRecord.status === 'late' ? '' : 'Regular attendance'}
                   </p>
                 </div>
-              </div>
+              </div> */}
             </div>
             
             <div className="flex justify-end space-x-3 mt-6">
@@ -1917,7 +2095,7 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
               <div>
                 <label className="block text-sm font-medium mb-1">Export Format</label>
                 <select
-                  className="border rounded px-2 py-1 text-sm bg-white dark:bg-gray-900"
+                  className="border rounded px-2 pr-8 py-1 text-sm bg-white dark:bg-gray-900"
                   value={exportFormat}
                   onChange={(e) => setExportFormat(e.target.value)}
                 >
@@ -2026,7 +2204,14 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
                   >
                     <option value="">Choose an employee...</option>
                     {(employees || [])
-                      .filter(emp => emp?.status === 'active')
+                      .filter(emp => {
+                        const isActive = emp?.status === 'active';
+                        // Filter by department (case-insensitive). Accept various structures
+                        const deptRaw = emp?.department || emp?.Employee?.department || emp?.Department?.name;
+                        const dept = String(deptRaw || '').toLowerCase();
+                        const inEngineering = dept === 'engineering';
+                        return isActive && inEngineering;
+                      })
                       .map(employee => (
                         <option key={employee.id} value={employee.employeeId}>
                           {employee.name} ({employee.employeeId}) - {employee.email}
