@@ -1,45 +1,86 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Bell, Check, Trash2, Filter, Search, X } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/Card';
+import { useNotifications } from '../../socket/NotificationContext';
+import { formatDistanceToNow } from 'date-fns';
 
 const NotificationsPage = ({ onClose }) => {
-  const [notifications, setNotifications] = useState([
-    { id: 1, title: 'Leave request approved', message: 'Your leave request for Dec 25-26 has been approved by HR department', time: '2 hours ago', unread: true, type: 'success', category: 'Leave' },
-    { id: 2, title: 'New payslip generated', message: 'Your payslip for November 2024 is now available for download in the payroll section', time: '1 day ago', unread: true, type: 'info', category: 'Payroll' },
-    { id: 3, title: 'Performance review due', message: 'Please complete your quarterly performance review by December 31st, 2024', time: '3 days ago', unread: false, type: 'warning', category: 'Performance' },
-    { id: 4, title: 'Team meeting scheduled', message: 'Weekly team sync meeting tomorrow at 10 AM in Conference Room A', time: '1 week ago', unread: false, type: 'info', category: 'Meetings' },
-    { id: 5, title: 'Document uploaded', message: 'New company policy document has been uploaded to the documents section', time: '2 weeks ago', unread: false, type: 'info', category: 'Documents' },
-    { id: 6, title: 'Expense report rejected', message: 'Your expense report #EXP-2024-001 has been rejected. Please review and resubmit', time: '3 weeks ago', unread: false, type: 'error', category: 'Expenses' },
-    { id: 7, title: 'Training reminder', message: 'Mandatory cybersecurity training must be completed by end of month', time: '1 month ago', unread: false, type: 'warning', category: 'Training' },
-    { id: 8, title: 'Birthday celebration', message: 'Join us in celebrating Sarah\'s birthday today at 3 PM in the break room', time: '1 month ago', unread: false, type: 'info', category: 'Social' }
-  ]);
+  // Get real notification data from Socket.io context
+  const {
+    notifications: realNotifications,
+    unreadCount,
+    loading,
+    error,
+    markAsRead: markNotificationAsRead,
+    markAllAsRead: markAllNotificationsAsRead,
+    deleteNotification: deleteNotificationFromAPI,
+    loadNotifications
+  } = useNotifications();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('all');
   const [filterCategory, setFilterCategory] = useState('all');
 
-  const unreadCount = notifications.filter(n => n.unread).length;
+  // Load notifications when component mounts
+  useEffect(() => {
+    loadNotifications();
+  }, [loadNotifications]);
 
-  const markAsRead = (notificationId) => {
-    setNotifications(prev => 
-      prev.map(notification => 
-        notification.id === notificationId 
-          ? { ...notification, unread: false }
-          : notification
-      )
-    );
+  // Helper function to convert notification type to UI type
+  const getUIType = (notification) => {
+    switch (notification.type) {
+      case 'leave_approved':
+        return 'success';
+      case 'leave_rejected':
+        return 'error';
+      case 'leave_pending':
+        return 'warning';
+      case 'payslip_generated':
+      case 'salary_processed':
+        return 'info';
+      case 'announcement':
+        return 'info';
+      default:
+        return 'info';
+    }
   };
 
-  const markAllAsRead = () => {
-    setNotifications(prev => 
-      prev.map(notification => ({ ...notification, unread: false }))
-    );
+  // Convert real notifications to UI format
+  const notifications = realNotifications.map(notification => ({
+    id: notification.id,
+    title: notification.title,
+    message: notification.message,
+    time: formatDistanceToNow(new Date(notification.createdAt), { addSuffix: true }),
+    unread: !notification.isRead,
+    type: getUIType(notification),
+    category: notification.category,
+    originalType: notification.type
+  }));
+
+  const markAsRead = async (notificationId) => {
+    try {
+      await markNotificationAsRead(notificationId);
+    } catch (error) {
+      console.error('Failed to mark notification as read:', error);
+    }
   };
 
-  const deleteNotification = (notificationId) => {
-    setNotifications(prev => prev.filter(n => n.id !== notificationId));
+  const markAllAsRead = async () => {
+    try {
+      await markAllNotificationsAsRead();
+    } catch (error) {
+      console.error('Failed to mark all notifications as read:', error);
+    }
+  };
+
+  const deleteNotification = async (notificationId) => {
+    try {
+      await deleteNotificationFromAPI(notificationId);
+    } catch (error) {
+      console.error('Failed to delete notification:', error);
+    }
   };
 
   const filteredNotifications = notifications.filter(notification => {
@@ -145,7 +186,26 @@ const NotificationsPage = ({ onClose }) => {
 
         {/* Notifications List */}
         <div className="flex-1 overflow-y-auto p-6">
-          {filteredNotifications.length === 0 ? (
+          {loading ? (
+            <div className="text-center py-12">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+              <p className="text-gray-500 dark:text-gray-400">Loading notifications...</p>
+            </div>
+          ) : error ? (
+            <div className="text-center py-12">
+              <div className="text-red-500 mb-4">❌</div>
+              <p className="text-red-500 mb-2">Failed to load notifications</p>
+              <p className="text-gray-500 text-sm">{error}</p>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => loadNotifications()}
+                className="mt-4"
+              >
+                Try Again
+              </Button>
+            </div>
+          ) : filteredNotifications.length === 0 ? (
             <div className="text-center py-12">
               <Bell className="h-12 w-12 mx-auto mb-4 text-gray-400" />
               <p className="text-gray-500 dark:text-gray-400">

@@ -262,7 +262,7 @@ const LeaveTypes = () => {
                             size="sm"
                             variant="outline"
                             onClick={() => handleEdit(leaveType)}
-                            className="bg-purple-600 hover:bg-purple-700 text-white border-purple-600 flex items-center space-x-1"
+                            className="bg-blue-600 hover:bg-blue-700 text-white border-blue-600 flex items-center space-x-1"
                           >
                             <Eye className="h-3 w-3" />
                             <span>View/Edit</span>

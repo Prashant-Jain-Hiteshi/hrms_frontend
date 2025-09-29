@@ -4,6 +4,7 @@ import { ThemeProvider } from './contexts/ThemeContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { DataProvider } from './contexts/DataContext';
 import { ToastProvider } from './components/ui/Toast';
+import { NotificationProvider } from './socket/NotificationContext';
 import Login from './components/Login';
 import Layout from './components/Layout/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -49,8 +50,9 @@ function App() {
     <ThemeProvider>
       <ToastProvider>
         <AuthProvider>
-          <DataProvider>
-            <Router>
+          <NotificationProvider>
+            <DataProvider>
+              <Router>
           <div className="min-h-screen bg-background text-foreground">
             <Routes>
               <Route path="/login" element={<Login />} />
@@ -78,8 +80,9 @@ function App() {
               </Route>
             </Routes>
           </div>
-            </Router>
-          </DataProvider>
+              </Router>
+            </DataProvider>
+          </NotificationProvider>
         </AuthProvider>
       </ToastProvider>
     </ThemeProvider>
