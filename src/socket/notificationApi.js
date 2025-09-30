@@ -64,13 +64,22 @@ class NotificationAPI {
    */
   async markAsRead(notificationId) {
     try {
+      console.log('🔍 Frontend markAsRead called with ID:', notificationId, 'Type:', typeof notificationId);
+      
+      // Validate notification ID
+      if (!notificationId || notificationId === 'undefined' || notificationId === 'null') {
+        console.error('❌ Frontend: Invalid notification ID provided:', notificationId);
+        throw new Error('Invalid notification ID provided');
+      }
+
       const response = await axios.put(`${this.baseURL}/${notificationId}/read`, {}, {
         headers: this.getAuthHeaders()
       });
 
+      console.log('✅ Frontend: Notification marked as read successfully:', notificationId);
       return response.data;
     } catch (error) {
-      console.error('Error marking notification as read:', error);
+      console.error('❌ Frontend: Error marking notification as read:', error);
       throw error;
     }
   }

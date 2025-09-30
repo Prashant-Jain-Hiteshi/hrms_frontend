@@ -47,6 +47,18 @@ const Header = ({ onMenuClick }) => {
         return 'error';
       case 'leave_pending':
         return 'warning';
+      case 'compensatory_leave_assigned':
+        return 'success';
+      case 'payroll_hr_approved':
+        return 'success';
+      case 'payroll_finance_approved':
+        return 'info';
+      case 'salary_transfer_initiated':
+        return 'warning';
+      case 'salary_transfer_completed':
+        return 'success';
+      case 'salary_transfer_failed':
+        return 'error';
       case 'payslip_generated':
       case 'salary_processed':
         return 'info';

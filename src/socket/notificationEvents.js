@@ -14,8 +14,14 @@ export const NOTIFICATION_EVENTS = {
   LEAVE_REJECTED: 'leave_rejected',
   LEAVE_PENDING: 'leave_pending',
   LEAVE_REQUEST_NEW: 'leave_request_new',
+  COMPENSATORY_LEAVE_ASSIGNED: 'compensatory_leave_assigned',
   
   // Payroll events
+  PAYROLL_HR_APPROVED: 'payroll_hr_approved',
+  PAYROLL_FINANCE_APPROVED: 'payroll_finance_approved',
+  SALARY_TRANSFER_INITIATED: 'salary_transfer_initiated',
+  SALARY_TRANSFER_COMPLETED: 'salary_transfer_completed',
+  SALARY_TRANSFER_FAILED: 'salary_transfer_failed',
   PAYSLIP_GENERATED: 'payslip_generated',
   SALARY_PROCESSED: 'salary_processed',
   
@@ -93,6 +99,60 @@ export const setupNotificationListeners = (callbacks = {}) => {
     }
   });
 
+  // Compensatory leave assigned
+  socket.on(NOTIFICATION_EVENTS.COMPENSATORY_LEAVE_ASSIGNED, (notification) => {
+    console.log('💳 Compensatory leave assigned:', notification);
+    
+    if (callbacks.onCompensatoryLeaveAssigned) {
+      callbacks.onCompensatoryLeaveAssigned(notification);
+    }
+  });
+
+  // Payroll HR approved
+  socket.on(NOTIFICATION_EVENTS.PAYROLL_HR_APPROVED, (notification) => {
+    console.log('💰 Payroll approved by HR:', notification);
+    
+    if (callbacks.onPayrollHRApproved) {
+      callbacks.onPayrollHRApproved(notification);
+    }
+  });
+
+  // Payroll Finance approved
+  socket.on(NOTIFICATION_EVENTS.PAYROLL_FINANCE_APPROVED, (notification) => {
+    console.log('✅ Payroll finalized by Finance:', notification);
+    
+    if (callbacks.onPayrollFinanceApproved) {
+      callbacks.onPayrollFinanceApproved(notification);
+    }
+  });
+
+  // Salary transfer initiated
+  socket.on(NOTIFICATION_EVENTS.SALARY_TRANSFER_INITIATED, (notification) => {
+    console.log('🏦 Salary transfer initiated:', notification);
+    
+    if (callbacks.onSalaryTransferInitiated) {
+      callbacks.onSalaryTransferInitiated(notification);
+    }
+  });
+
+  // Salary transfer completed
+  socket.on(NOTIFICATION_EVENTS.SALARY_TRANSFER_COMPLETED, (notification) => {
+    console.log('💰 Salary transfer completed:', notification);
+    
+    if (callbacks.onSalaryTransferCompleted) {
+      callbacks.onSalaryTransferCompleted(notification);
+    }
+  });
+
+  // Salary transfer failed
+  socket.on(NOTIFICATION_EVENTS.SALARY_TRANSFER_FAILED, (notification) => {
+    console.log('❌ Salary transfer failed:', notification);
+    
+    if (callbacks.onSalaryTransferFailed) {
+      callbacks.onSalaryTransferFailed(notification);
+    }
+  });
+
   // Company announcements
   socket.on(NOTIFICATION_EVENTS.ANNOUNCEMENT, (notification) => {
     console.log('📢 Company announcement:', notification);
@@ -146,7 +206,13 @@ const showBrowserNotification = (notification) => {
       
       // Navigate to relevant page based on notification type
       if (notification.category === 'Leave') {
-        window.location.hash = '#/leave-management';
+        if (notification.type === 'compensatory_leave_assigned') {
+          window.location.hash = '#/leave-management/compensatory';
+        } else {
+          window.location.hash = '#/leave-management';
+        }
+      } else if (notification.category === 'Payroll') {
+        window.location.hash = '#/payroll';
       }
     };
   } catch (error) {

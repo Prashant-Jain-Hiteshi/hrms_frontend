@@ -58,6 +58,12 @@ export const NotificationProvider = ({ children }) => {
         onLeaveApproved: handleLeaveApproved,
         onLeaveRejected: handleLeaveRejected,
         onLeavePending: handleLeavePending,
+        onCompensatoryLeaveAssigned: handleCompensatoryLeaveAssigned,
+        onPayrollHRApproved: handlePayrollHRApproved,
+        onPayrollFinanceApproved: handlePayrollFinanceApproved,
+        onSalaryTransferInitiated: handleSalaryTransferInitiated,
+        onSalaryTransferCompleted: handleSalaryTransferCompleted,
+        onSalaryTransferFailed: handleSalaryTransferFailed,
         onAnnouncement: handleAnnouncement,
       });
 
@@ -153,6 +159,36 @@ export const NotificationProvider = ({ children }) => {
     handleNewNotification(notification);
   }, [handleNewNotification]);
 
+  const handleCompensatoryLeaveAssigned = useCallback((notification) => {
+    console.log('💳 Compensatory leave assigned:', notification);
+    handleNewNotification(notification);
+  }, [handleNewNotification]);
+
+  const handlePayrollHRApproved = useCallback((notification) => {
+    console.log('💰 Payroll approved by HR:', notification);
+    handleNewNotification(notification);
+  }, [handleNewNotification]);
+
+  const handlePayrollFinanceApproved = useCallback((notification) => {
+    console.log('✅ Payroll finalized by Finance:', notification);
+    handleNewNotification(notification);
+  }, [handleNewNotification]);
+
+  const handleSalaryTransferInitiated = useCallback((notification) => {
+    console.log('🏦 Salary transfer initiated:', notification);
+    handleNewNotification(notification);
+  }, [handleNewNotification]);
+
+  const handleSalaryTransferCompleted = useCallback((notification) => {
+    console.log('💰 Salary transfer completed:', notification);
+    handleNewNotification(notification);
+  }, [handleNewNotification]);
+
+  const handleSalaryTransferFailed = useCallback((notification) => {
+    console.log('❌ Salary transfer failed:', notification);
+    handleNewNotification(notification);
+  }, [handleNewNotification]);
+
   const handleAnnouncement = useCallback((notification) => {
     console.log('📢 Company announcement:', notification);
     handleNewNotification(notification);
@@ -220,6 +256,22 @@ export const NotificationProvider = ({ children }) => {
     return notifications.filter(n => n.type === type);
   }, [notifications]);
 
+  const getCompensatoryLeaveNotifications = useCallback(() => {
+    return notifications.filter(n => n.type === 'compensatory_leave_assigned');
+  }, [notifications]);
+
+  const getPayrollNotifications = useCallback(() => {
+    return notifications.filter(n => 
+      n.type === 'payroll_hr_approved' || 
+      n.type === 'payroll_finance_approved' ||
+      n.type === 'salary_transfer_initiated' ||
+      n.type === 'salary_transfer_completed' ||
+      n.type === 'salary_transfer_failed' ||
+      n.type === 'payslip_generated' ||
+      n.type === 'salary_processed'
+    );
+  }, [notifications]);
+
   // Toast notification helper
   const showToastNotification = (notification) => {
     // You can integrate with your toast library here
@@ -250,6 +302,8 @@ export const NotificationProvider = ({ children }) => {
     getLeaveNotifications,
     getUnreadNotifications,
     getNotificationsByType,
+    getCompensatoryLeaveNotifications,
+    getPayrollNotifications,
     
     // Socket info
     isSocketConnected: () => isSocketConnected(),
