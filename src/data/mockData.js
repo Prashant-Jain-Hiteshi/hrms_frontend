@@ -150,24 +150,24 @@ export const MOCK_EXPENSE_REQUESTS = [
 
 // Mock announcements
 export const MOCK_ANNOUNCEMENTS = [
-  {
-    id: 1,
-    title: 'New Office Opening',
-    content: 'We are excited to announce the opening of our new office in Pune!',
-    type: 'info',
-    publishedDate: format(subDays(new Date(), 2), 'yyyy-MM-dd'),
-    publishedBy: 2,
-    priority: 'high'
-  },
-  {
-    id: 2,
-    title: 'Holiday Notice',
-    content: 'Office will remain closed on Independence Day (August 15th).',
-    type: 'notice',
-    publishedDate: format(subDays(new Date(), 5), 'yyyy-MM-dd'),
-    publishedBy: 2,
-    priority: 'medium'
-  }
+  // {
+  //   id: 1,
+  //   title: 'New Office Opening',
+  //   content: 'We are excited to announce the opening of our new office in Pune!',
+  //   type: 'info',
+  //   publishedDate: format(subDays(new Date(), 2), 'yyyy-MM-dd'),
+  //   publishedBy: 2,
+  //   priority: 'high'
+  // },
+  // {
+  //   id: 2,
+  //   title: 'Holiday Notice',
+  //   content: 'Office will remain closed on Independence Day (August 15th).',
+  //   type: 'notice',
+  //   publishedDate: format(subDays(new Date(), 5), 'yyyy-MM-dd'),
+  //   publishedBy: 2,
+  //   priority: 'medium'
+  // }
 ];
 
 // Dashboard stats

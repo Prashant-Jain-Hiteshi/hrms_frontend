@@ -45,6 +45,12 @@ export const LeaveAPI = {
   // Delete leave request
   delete: (id) => api.delete(`/leave/${id}`),
 
+  // Dashboard endpoints
+  dashboard: {
+    // Get monthly leave trends for admin dashboard (Admin/HR only)
+    getMonthlyTrends: () => api.get('/leave/dashboard/monthly-trends'),
+  },
+
   // Admin endpoints
   admin: {
     // Get all leave requests (Admin only)

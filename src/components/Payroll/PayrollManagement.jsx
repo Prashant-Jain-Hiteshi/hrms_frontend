@@ -118,8 +118,8 @@ const PayrollManagement = () => {
     employeesPaid: 0,
     totalEmployees: 0,
     avgSalary: 0,
-    pendingReimbursements: 1250, // Mock as requested
-    pendingReimbursementCount: 5 // Mock as requested
+    pendingReimbursements: 0, // Mock as requested
+    pendingReimbursementCount: 0 // Mock as requested
   });
   const [departmentData, setDepartmentData] = useState([]);
   const [dashboardLoading, setDashboardLoading] = useState(false);
@@ -486,8 +486,8 @@ const loadDashboardData = async () => {
 
     setDashboardData({
       ...summaryRes.data,
-      pendingReimbursements: 1250, // Keep mock as requested
-      pendingReimbursementCount: 5 // Keep mock as requested
+      pendingReimbursements: 0, // Keep mock as requested
+      pendingReimbursementCount: 0 // Keep mock as requested
     });
     setDepartmentData(deptRes.data.departments || []);
   } catch (error) {

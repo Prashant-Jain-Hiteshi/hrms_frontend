@@ -15,6 +15,44 @@ const FinanceDashboard = () => {
   const { user } = useAuth();
   const stats = getDashboardStats('finance');
   
+  // One-time hard refresh functionality
+  useEffect(() => {
+    const handleOneTimeRefresh = () => {
+      try {
+        // Check if this is the first visit to dashboard after login
+        const hasRefreshedThisSession = sessionStorage.getItem('dashboard_refreshed');
+        const currentPath = window.location.pathname;
+        
+        console.log('🔍 Finance Dashboard refresh check:', {
+          hasRefreshedThisSession,
+          currentPath,
+          isFinanceDashboard: currentPath.includes('finance') || currentPath === '/dashboard'
+        });
+
+        // Only refresh if:
+        // 1. Haven't refreshed this session yet
+        // 2. We're on the finance dashboard or main dashboard
+        if (!hasRefreshedThisSession && (currentPath.includes('finance') || currentPath === '/dashboard')) {
+          console.log('🔄 Performing one-time hard refresh for Finance dashboard...');
+          
+          // Mark as refreshed for this session
+          sessionStorage.setItem('dashboard_refreshed', 'true');
+          
+          // Add a small delay to ensure the session storage is set
+          setTimeout(() => {
+            // Perform hard refresh
+            window.location.reload(true);
+          }, 100);
+        }
+      } catch (error) {
+        console.error('❌ Error in Finance dashboard refresh logic:', error);
+      }
+    };
+
+    // Execute the refresh check
+    handleOneTimeRefresh();
+  }, []); // Empty dependency array ensures this runs only once on mount
+  
   // Real data state
   const [realData, setRealData] = useState({
     monthlyPayroll: 0,

@@ -118,7 +118,7 @@ const PayrollProgressChart = ({ payrollData = [], onRefresh = null }) => {
         </div>
       </div>
 
-      <div className="bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/20 p-3 sm:p-4 rounded-lg border border-purple-200 dark:border-purple-800">
+      {/* <div className="bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/20 p-3 sm:p-4 rounded-lg border border-purple-200 dark:border-purple-800">
         <div className="flex items-center justify-between">
           <div className="min-w-0 flex-1">
             <p className="text-xs sm:text-sm font-medium text-purple-600 dark:text-purple-400 truncate">Total Amount</p>
@@ -128,7 +128,7 @@ const PayrollProgressChart = ({ payrollData = [], onRefresh = null }) => {
           </div>
           <DollarSign className="h-6 w-6 sm:h-8 sm:w-8 text-purple-500 flex-shrink-0" />
         </div>
-      </div>
+      </div> */}
     </div>
   );
 

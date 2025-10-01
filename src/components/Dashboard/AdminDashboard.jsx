@@ -1,21 +1,96 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
-import { 
-  Users, Building2, Calendar, DollarSign, TrendingUp, 
+import {
+  Users, Building2, Calendar, DollarSign, TrendingUp,
   Clock, UserPlus, FileText, AlertCircle, CheckCircle, XCircle
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell } from 'recharts';
 import { useData } from '../../contexts/DataContext';
 import { AttendanceAPI } from '../../lib/api';
+import { LeaveAPI } from '../../lib/leaveApi';
 import { MOCK_ANNOUNCEMENTS } from '../../data/mockData';
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
   const { employees, leaveRequests, tasks, allAttendance, allAttendanceLoading, fetchAllAttendance, quickActions } = useData();
   const [presentTodayLocal, setPresentTodayLocal] = React.useState(null);
-  
+  const [leaveData, setLeaveData] = useState([]);
+  const [leaveTrendsLoading, setLeaveTrendsLoading] = useState(false);
+
+  // One-time hard refresh functionality
+  useEffect(() => {
+    const handleOneTimeRefresh = () => {
+      try {
+        // Check if this is the first visit to dashboard after login
+        const hasRefreshedThisSession = sessionStorage.getItem('dashboard_refreshed');
+        const currentPath = window.location.pathname;
+
+        console.log('🔍 Dashboard refresh check:', {
+          hasRefreshedThisSession,
+          currentPath,
+          isAdminDashboard: currentPath.includes('admin') || currentPath === '/dashboard'
+        });
+
+        // Only refresh if:
+        // 1. Haven't refreshed this session yet
+        // 2. We're on the admin dashboard or main dashboard
+        if (!hasRefreshedThisSession && (currentPath.includes('admin') || currentPath === '/dashboard')) {
+          console.log('🔄 Performing one-time hard refresh for dashboard...');
+
+          // Mark as refreshed for this session
+          sessionStorage.setItem('dashboard_refreshed', 'true');
+
+          // Add a small delay to ensure the session storage is set
+          setTimeout(() => {
+            // Perform hard refresh
+            window.location.reload(true);
+          }, 100);
+        }
+      } catch (error) {
+        console.error('❌ Error in dashboard refresh logic:', error);
+      }
+    };
+
+    // Execute the refresh check
+    handleOneTimeRefresh();
+  }, []); // Empty dependency array ensures this runs only once on mount
+
+  // Load monthly leave trends for the chart
+  useEffect(() => {
+    const fetchLeaveTrends = async () => {
+      try {
+        setLeaveTrendsLoading(true);
+        console.log('📊 Fetching monthly leave trends...');
+        
+        const response = await LeaveAPI.dashboard.getMonthlyTrends();
+        
+        if (response.data?.success && response.data?.data) {
+          const trendsData = response.data.data.map(item => ({
+            name: item.month,
+            leaves: item.leaves
+          }));
+          
+          setLeaveData(trendsData);
+          console.log('✅ Leave trends loaded:', trendsData);
+        } else {
+          console.warn('⚠️ Invalid leave trends response:', response.data);
+          // Fallback to empty data
+          setLeaveData([]);
+        }
+      } catch (error) {
+        console.error('❌ Error fetching leave trends:', error);
+        // Fallback to empty data on error
+        setLeaveData([]);
+      } finally {
+        setLeaveTrendsLoading(false);
+      }
+    };
+
+    fetchLeaveTrends();
+  }, []); // Load once on component mount
+
   // Load current week's attendance (Mon-Fri) for charts and stats
   useEffect(() => {
     const now = new Date();
@@ -47,7 +122,7 @@ const AdminDashboard = () => {
       }
     })();
   }, []);
-  
+
   // Calculate real-time dashboard stats from live data
   const activeEmployees = (employees || []).filter(emp => (emp?.status || 'active') === 'active');
   const today = new Date().toISOString().split('T')[0];
@@ -61,7 +136,7 @@ const AdminDashboard = () => {
   const pendingLeaves = leaveRequests.filter(leave => leave.status === 'pending');
   const pendingTasks = tasks.filter(task => task.status === 'pending');
   const thisMonth = new Date().toISOString().slice(0, 7); // YYYY-MM format
-  const newEmployeesThisMonth = activeEmployees.filter(emp => 
+  const newEmployeesThisMonth = activeEmployees.filter(emp =>
     emp.joiningDate && emp.joiningDate.startsWith(thisMonth)
   );
 
@@ -107,14 +182,7 @@ const AdminDashboard = () => {
     return { name: dayLabels[idx], present, absent };
   });
 
-  const leaveData = [
-    { name: 'Jan', leaves: 12 },
-    { name: 'Feb', leaves: 8 },
-    { name: 'Mar', leaves: 15 },
-    { name: 'Apr', leaves: 10 },
-    { name: 'May', leaves: 18 },
-    { name: 'Jun', leaves: 22 },
-  ];
+  // Leave trends data is now managed by state (leaveData) and loaded via API
 
   // Build real Department Distribution from employees list
   const departmentData = React.useMemo(() => {
@@ -129,9 +197,9 @@ const AdminDashboard = () => {
   }, [safeEmployees]);
 
   const upcomingBirthdays = [
-    { name: 'John Doe', date: 'Aug 25', department: 'Engineering' },
-    { name: 'Jane Smith', date: 'Aug 27', department: 'HR' },
-    { name: 'Mike Johnson', date: 'Aug 30', department: 'Finance' },
+    // { name: 'John Doe', date: 'Aug 25', department: 'Engineering' },
+    // { name: 'Jane Smith', date: 'Aug 27', department: 'HR' },
+    // { name: 'Mike Johnson', date: 'Aug 30', department: 'Finance' },
   ];
 
   return (
@@ -177,7 +245,7 @@ const AdminDashboard = () => {
           </CardContent>
         </Card>
 
-        <Card>
+        {/* <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Pending Tasks</CardTitle>
             <AlertCircle className="h-4 w-4 text-muted-foreground" />
@@ -186,7 +254,7 @@ const AdminDashboard = () => {
             <div className="text-2xl font-bold">{stats.pendingTasks}</div>
             <p className="text-xs text-muted-foreground">Need attention</p>
           </CardContent>
-        </Card>
+        </Card> */}
       </div>
 
       {/* Charts Row */}
@@ -218,15 +286,28 @@ const AdminDashboard = () => {
             <CardDescription>Monthly leave requests over time</CardDescription>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={leaveData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" />
-                <YAxis />
-                <Tooltip />
-                <Line type="monotone" dataKey="leaves" stroke="#10b981" strokeWidth={2} />
-              </LineChart>
-            </ResponsiveContainer>
+            {leaveTrendsLoading ? (
+              <div className="flex items-center justify-center h-[300px]">
+                <div className="text-center">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-2"></div>
+                  <p className="text-sm text-muted-foreground">Loading leave trends...</p>
+                </div>
+              </div>
+            ) : leaveData.length === 0 ? (
+              <div className="flex items-center justify-center h-[300px]">
+                <p className="text-sm text-muted-foreground">No leave data available</p>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={leaveData}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="name" />
+                  <YAxis />
+                  <Tooltip />
+                  <Line type="monotone" dataKey="leaves" stroke="#10b981" strokeWidth={2} />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -280,20 +361,27 @@ const AdminDashboard = () => {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {upcomingBirthdays.map((person, index) => (
-                <div key={index} className="flex items-center space-x-3">
-                  <div className="bg-primary/10 rounded-full p-2">
-                    <Users className="h-4 w-4 text-primary" />
+              {upcomingBirthdays.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center">
+                  No upcoming birthdays this week
+                </p>
+              ) : (
+                upcomingBirthdays.map((person, index) => (
+                  <div key={index} className="flex items-center space-x-3">
+                    <div className="bg-primary/10 rounded-full p-2">
+                      <Users className="h-4 w-4 text-primary" />
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm font-medium">{person.name}</p>
+                      <p className="text-xs text-muted-foreground">{person.department}</p>
+                    </div>
+                    <div className="text-xs text-muted-foreground">{person.date}</div>
                   </div>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium">{person.name}</p>
-                    <p className="text-xs text-muted-foreground">{person.department}</p>
-                  </div>
-                  <div className="text-xs text-muted-foreground">{person.date}</div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </CardContent>
+
         </Card>
 
         {/* Recent Announcements */}
@@ -304,18 +392,30 @@ const AdminDashboard = () => {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {MOCK_ANNOUNCEMENTS.slice(0, 3).map((announcement) => (
-                <div key={announcement.id} className="border-l-4 border-primary pl-4">
-                  <h4 className="text-sm font-medium">{announcement.title}</h4>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {announcement.content.substring(0, 80)}...
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-2">{announcement.publishedDate}</p>
-                </div>
-              ))}
+              {MOCK_ANNOUNCEMENTS.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center">
+                   No announcements available
+                </p>
+              ) : (
+                MOCK_ANNOUNCEMENTS.slice(0, 3).map((announcement) => (
+                  <div
+                    key={announcement.id}
+                    className="border-l-4 border-primary pl-4"
+                  >
+                    <h4 className="text-sm font-medium">{announcement.title}</h4>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {announcement.content.substring(0, 80)}...
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-2">
+                      {announcement.publishedDate}
+                    </p>
+                  </div>
+                ))
+              )}
             </div>
           </CardContent>
         </Card>
+
       </div>
 
       {/* Quick Actions */}
@@ -326,32 +426,32 @@ const AdminDashboard = () => {
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               className="flex flex-col items-center p-4 h-auto"
               onClick={() => navigate('/employees')}
             >
               <UserPlus className="h-6 w-6 text-primary mb-2" />
               <span className="text-sm font-medium">Add Employee</span>
             </Button>
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               className="flex flex-col items-center p-4 h-auto"
               onClick={() => navigate('/reports')}
             >
               <FileText className="h-6 w-6 text-primary mb-2" />
               <span className="text-sm font-medium">Generate Report</span>
             </Button>
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               className="flex flex-col items-center p-4 h-auto"
               onClick={() => navigate('/leave')}
             >
               <Calendar className="h-6 w-6 text-primary mb-2" />
               <span className="text-sm font-medium">Approve Leaves</span>
             </Button>
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               className="flex flex-col items-center p-4 h-auto"
               onClick={() => navigate('/payroll')}
             >
@@ -365,12 +465,12 @@ const AdminDashboard = () => {
       {/* Pending Actions */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>
-          <CardHeader>
+          {/* <CardHeader>
             <CardTitle>Pending Leave Requests</CardTitle>
             <CardDescription>Requires your approval</CardDescription>
           </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
+          <CardContent> */}
+            {/* <div className="space-y-3">
               {pendingLeaves.slice(0, 5).map((leave) => (
                 <div key={leave.id} className="flex items-center justify-between p-3 border-b border-gray-100 dark:border-gray-700 last:border-b-0">
                   <div className="flex items-center space-x-3">
@@ -393,23 +493,22 @@ const AdminDashboard = () => {
                 </div>
               ))}
             </div>
-          </CardContent>
+          </CardContent> */}
         </Card>
 
         <Card>
-          <CardHeader>
+          {/* <CardHeader>
             <CardTitle>Pending Tasks</CardTitle>
             <CardDescription>Tasks requiring attention</CardDescription>
-          </CardHeader>
-          <CardContent>
+          </CardHeader> */}
+          {/* <CardContent>
             <div className="space-y-3">
               {pendingTasks.slice(0, 5).map((task) => (
                 <div key={task.id} className="flex items-center justify-between p-3 border-b border-gray-100 dark:border-gray-700 last:border-b-0">
                   <div className="flex items-center space-x-3">
-                    <div className={`w-3 h-3 rounded-full ${
-                      task.priority === 'high' ? 'bg-red-500' :
+                    <div className={`w-3 h-3 rounded-full ${task.priority === 'high' ? 'bg-red-500' :
                       task.priority === 'medium' ? 'bg-yellow-500' : 'bg-green-500'
-                    }`}></div>
+                      }`}></div>
                     <div>
                       <p className="text-sm font-medium">{task.title}</p>
                       <p className="text-xs text-muted-foreground">Assigned to: {task.assignee}</p>
@@ -421,7 +520,7 @@ const AdminDashboard = () => {
                 </div>
               ))}
             </div>
-          </CardContent>
+          </CardContent> */}
         </Card>
       </div>
     </div>
