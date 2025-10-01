@@ -18,43 +18,6 @@ const EmployeeDashboard = () => {
   const { leaveRequests, tasks, myAttendance, fetchMyAttendance } = useData();
   const stats = getDashboardStats('employee');
 
-  // One-time hard refresh functionality
-  useEffect(() => {
-    const handleOneTimeRefresh = () => {
-      try {
-        // Check if this is the first visit to dashboard after login
-        const hasRefreshedThisSession = sessionStorage.getItem('dashboard_refreshed');
-        const currentPath = window.location.pathname;
-        
-        console.log('🔍 Employee Dashboard refresh check:', {
-          hasRefreshedThisSession,
-          currentPath,
-          isEmployeeDashboard: currentPath.includes('employee') || currentPath === '/dashboard'
-        });
-
-        // Only refresh if:
-        // 1. Haven't refreshed this session yet
-        // 2. We're on the employee dashboard or main dashboard
-        if (!hasRefreshedThisSession && (currentPath.includes('employee') || currentPath === '/dashboard')) {
-          console.log('🔄 Performing one-time hard refresh for employee dashboard...');
-          
-          // Mark as refreshed for this session
-          sessionStorage.setItem('dashboard_refreshed', 'true');
-          
-          // Add a small delay to ensure the session storage is set
-          setTimeout(() => {
-            // Perform hard refresh
-            window.location.reload(true);
-          }, 100);
-        }
-      } catch (error) {
-        console.error('❌ Error in employee dashboard refresh logic:', error);
-      }
-    };
-
-    // Execute the refresh check
-    handleOneTimeRefresh();
-  }, []); // Empty dependency array ensures this runs only once on mount
 
   // DOJ-based leave balance state
   const [leaveBalanceMap, setLeaveBalanceMap] = useState({});

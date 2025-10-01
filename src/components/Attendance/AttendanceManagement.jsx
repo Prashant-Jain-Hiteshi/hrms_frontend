@@ -1021,6 +1021,73 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
     setReportOpen(false);
   };
 
+  // 🚀 Comprehensive refresh function for attendance data
+  // This function refreshes ONLY attendance-related data, not other modules
+  const refreshAttendanceData = async () => {
+    try {
+      console.log('🔄 Refreshing attendance data for current page...');
+      
+      // Create array of refresh promises to run in parallel
+      const refreshPromises = [];
+      
+      // 1. Refresh all attendance data (for admin/HR view)
+      if (fetchAllAttendance) {
+        refreshPromises.push(
+          fetchAllAttendance().catch(err => {
+            console.error('Failed to refresh all attendance:', err);
+          })
+        );
+      }
+      
+      // 2. Refresh my attendance data (for employee view)
+      if (fetchMyAttendance) {
+        refreshPromises.push(
+          fetchMyAttendance().catch(err => {
+            console.error('Failed to refresh my attendance:', err);
+          })
+        );
+      }
+      
+      // 3. Refresh attendance status for current user
+      if (fetchAttendanceStatus) {
+        refreshPromises.push(
+          fetchAttendanceStatus().catch(err => {
+            console.error('Failed to refresh attendance status:', err);
+          })
+        );
+      }
+      
+      // 4. Refresh weekly attendance data
+      refreshPromises.push(
+        loadWeeklyData().catch(err => {
+          console.error('Failed to refresh weekly data:', err);
+        })
+      );
+      
+      // 5. Refresh today's attendance stats
+      const today = new Date().toISOString().split('T')[0];
+      if (selectedDate === today) {
+        // Only refresh stats if we're viewing today's data
+        refreshPromises.push(
+          Promise.resolve().then(async () => {
+            // This will trigger a re-render of stats cards
+            setSelectedDate(today);
+          }).catch(err => {
+            console.error('Failed to refresh today stats:', err);
+          })
+        );
+      }
+      
+      // 6. Execute all refreshes in parallel for better performance
+      await Promise.all(refreshPromises);
+      
+      console.log('✅ Attendance data refreshed successfully');
+      
+    } catch (error) {
+      console.error('❌ Error refreshing attendance data:', error);
+    }
+  };
+
   // Add Employee Attendance Handler Functions
   const handleAddAttendanceFormChange = (field, value) => {
     setAddAttendanceForm(prev => ({
@@ -1099,21 +1166,16 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
       // Call API to add attendance (we'll need to add this endpoint)
       await AttendanceAPI.addEmployeeAttendance(attendanceData);
 
-      // Show success notification
+      // 🚀 Refresh ALL attendance-related data for current page
+      await refreshAttendanceData();
+
+      // Show success notification after refresh
       const selectedEmployee = employees.find(emp => emp.id === parseInt(employeeId));
       const employeeName = selectedEmployee?.name || 'Employee';
       notify({ 
         type: 'success', 
-        message: `Attendance added successfully for ${employeeName} on ${date}!` 
+        message: `Attendance added successfully for ${employeeName} on ${date}! Page data updated.` 
       });
-
-      // Refresh attendance data
-      if (fetchAllAttendance) {
-        await fetchAllAttendance();
-      }
-      if (fetchMyAttendance) {
-        await fetchMyAttendance();
-      }
 
       // Reset form and close modal
       setAddAttendanceForm({

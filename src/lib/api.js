@@ -48,7 +48,31 @@ export const AuthAPI = {
 
 // Employees endpoints
 export const EmployeesAPI = {
+  // Enhanced list with pagination, search and filters
   list: (params = {}) => api.get('/employees', { params }),
+  
+  // Paginated list with search and filters
+  listPaginated: (params = {}) => {
+    const queryParams = {
+      page: params.page || 1,
+      limit: params.limit || 10,
+      search: params.search || '',
+      department: params.department || '',
+      status: params.status || '',
+      sortBy: params.sortBy || 'joiningDate',
+      sortOrder: params.sortOrder || 'desc'
+    };
+    
+    // Remove empty parameters
+    Object.keys(queryParams).forEach(key => {
+      if (!queryParams[key] && queryParams[key] !== 0) {
+        delete queryParams[key];
+      }
+    });
+    
+    return api.get('/employees', { params: queryParams });
+  },
+  
   create: (data) => api.post('/employees', data),
   // Using PUT due to browser/PATCH issues
   update: (id, data) => api.put(`/employees/${id}`, data),
@@ -99,6 +123,8 @@ export const LeaveAPI = {
   myBalance: () => api.get('/leave/balance'),
   // Leave statistics; admin can pass employeeId to query others
   statistics: (employeeId) => api.get('/leave/statistics', { params: employeeId ? { employeeId } : {} }),
+  // Monthly leave trends for dashboard (Admin/HR only)
+  monthlyTrends: () => api.get('/leave/dashboard/monthly-trends'),
 };
 
 // Leave Calendar (Admin): holidays, weekends, working-days

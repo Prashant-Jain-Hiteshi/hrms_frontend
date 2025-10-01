@@ -10,7 +10,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, 
 import { useAuth } from '../../contexts/AuthContext';
 import { useData } from '../../contexts/DataContext';
 import { LeaveAPI } from '../../lib/leaveApi';
-import { AttendanceAPI } from '../../lib/api';
+import { AttendanceAPI, LeaveAPI as MainLeaveAPI } from '../../lib/api';
 import { CalendarAPI } from '../../lib/api';
 import { compensatoryLeaveAPI } from '../../lib/compensatoryLeaveApi';
 import LeaveTypes from './LeaveTypes';
@@ -18,7 +18,7 @@ import LeaveTypesChart from './LeaveTypesChart';
 
 const LeaveManagement = () => {
   const { user } = useAuth();
-  const { leaveRequests, addLeaveRequest, approveLeave, rejectLeave, cancelLeave, employees, leaveTypes, fetchLeaveBalance, myAttendance, monthlyCreditTotal, monthlyCreditAnnual } = useData();
+  const { leaveRequests, addLeaveRequest, approveLeave, rejectLeave, cancelLeave, employees, leaveTypes, fetchLeaveBalance, fetchEmployees, myAttendance, monthlyCreditTotal, monthlyCreditAnnual } = useData();
   const [selectedTab, setSelectedTab] = useState('overview');
   const [searchTerm, setSearchTerm] = useState('');
   const [showApplyForm, setShowApplyForm] = useState(false);
@@ -42,6 +42,11 @@ const LeaveManagement = () => {
   const [editHoliday, setEditHoliday] = useState({ date: '', name: '', type: 'public' });
   const [showCalendarModal, setShowCalendarModal] = useState(false);
 
+  // Monthly trends state
+  const [monthlyTrendsData, setMonthlyTrendsData] = useState([]);
+  const [monthlyTrendsLoading, setMonthlyTrendsLoading] = useState(false);
+  const [monthlyTrendsError, setMonthlyTrendsError] = useState(null);
+
   // Compensatory Leave state (HR only)
   const [compensatoryLeaves, setCompensatoryLeaves] = useState([]);
   const [compensatorySummary, setCompensatorySummary] = useState({
@@ -52,6 +57,50 @@ const LeaveManagement = () => {
     totalUsed: 0
   });
   const [loadingCompensatory, setLoadingCompensatory] = useState(false);
+
+  // 🚀 Fetch monthly leave trends from API
+  const fetchMonthlyTrends = async () => {
+    try {
+      setMonthlyTrendsLoading(true);
+      setMonthlyTrendsError(null);
+      
+      console.log('🔄 Fetching monthly leave trends...');
+      const response = await MainLeaveAPI.monthlyTrends();
+      
+      if (response.data?.success && response.data?.data) {
+        const trendsData = response.data.data.map(item => ({
+          month: item.month,
+          year: item.year,
+          leaves: item.leaves,
+          // For now, we'll show total leaves as "approved" 
+          // Later we can enhance backend to return status breakdown
+          approved: item.leaves,
+          pending: 0,
+          rejected: 0
+        }));
+        
+        setMonthlyTrendsData(trendsData);
+        console.log('✅ Monthly trends loaded:', trendsData);
+      } else {
+        throw new Error('Invalid response format');
+      }
+    } catch (error) {
+      console.error('❌ Error fetching monthly trends:', error);
+      setMonthlyTrendsError(error.message || 'Failed to load monthly trends');
+      
+      // Fallback to mock data
+      setMonthlyTrendsData([
+        { month: 'May', approved: 0, pending: 0, rejected: 0 },
+        { month: 'Jun', approved: 0, pending: 0, rejected: 0 },
+        { month: 'Jul', approved: 0, pending: 0, rejected: 0 },
+        { month: 'Aug', approved: 0, pending: 0, rejected: 0 },
+        { month: 'Sep', approved: 0, pending: 0, rejected: 0 },
+        { month: 'Oct', approved: 0, pending: 0, rejected: 0 }
+      ]);
+    } finally {
+      setMonthlyTrendsLoading(false);
+    }
+  };
   const [showCompensatoryForm, setShowCompensatoryForm] = useState(false);
   const [editingCompensatory, setEditingCompensatory] = useState(null);
   const [compensatoryForm, setCompensatoryForm] = useState({
@@ -363,6 +412,35 @@ const LeaveManagement = () => {
       setSelectedTab('overview');
     }
   }, [selectedTab, role]);
+
+  // 🚀 Load monthly trends when overview tab is selected (Admin/HR only)
+  useEffect(() => {
+    if (selectedTab === 'overview' && (isAdmin || isHR)) {
+      fetchMonthlyTrends();
+    }
+  }, [selectedTab, isAdmin, isHR]);
+
+  // 🚀 Debug employees data for leave form
+  useEffect(() => {
+    console.log('🔍 DEBUG - Employees data for leave form:', {
+      employeesCount: employees?.length || 0,
+      employees: employees?.slice(0, 3), // Show first 3 for debugging
+      showApplyForm
+    });
+  }, [employees, showApplyForm]);
+
+  // 🚀 Ensure employees are loaded when apply form is opened
+  useEffect(() => {
+    if (showApplyForm && (!employees || employees.length === 0)) {
+      console.log('🔄 Leave form opened but no employees loaded, fetching...');
+      // Try to fetch employees from DataContext
+      if (typeof fetchEmployees === 'function') {
+        fetchEmployees().catch(err => {
+          console.error('❌ Failed to fetch employees for leave form:', err);
+        });
+      }
+    }
+  }, [showApplyForm, employees]);
 
   // Helpers
   const formatDateTime = (dateStr, timeStr) => {
@@ -848,13 +926,14 @@ const LeaveManagement = () => {
     { name: 'Emergency Leave', value: leaveTypeCounts['Emergency Leave'] || 0, color: '#6366f1' }
   ].filter(item => item.value > 0);
 
-  const monthlyLeaveData = [
-    { month: 'Jan', approved: 12, pending: 3, rejected: 1 },
-    { month: 'Feb', approved: 15, pending: 5, rejected: 2 },
-    { month: 'Mar', approved: 18, pending: 2, rejected: 1 },
-    { month: 'Apr', approved: 20, pending: 4, rejected: 3 },
-    { month: 'May', approved: 25, pending: 6, rejected: 2 },
-    { month: 'Jun', approved: 22, pending: 3, rejected: 1 }
+  // 🚀 Use real API data or fallback to current month + 5 previous months
+  const monthlyLeaveData = monthlyTrendsData.length > 0 ? monthlyTrendsData : [
+    { month: 'May', approved: 0, pending: 0, rejected: 0 },
+    { month: 'Jun', approved: 0, pending: 0, rejected: 0 },
+    { month: 'Jul', approved: 0, pending: 0, rejected: 0 },
+    { month: 'Aug', approved: 0, pending: 0, rejected: 0 },
+    { month: 'Sep', approved: 0, pending: 0, rejected: 0 },
+    { month: 'Oct', approved: 0, pending: 0, rejected: 0 }
   ];
 
   // =====================
@@ -1642,29 +1721,73 @@ const LeaveManagement = () => {
 
           {/* Charts */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <LeaveTypesChart 
+            {/* <LeaveTypesChart 
               leaveData={leaveTypeData} 
               title="Leave Types Distribution"
               chartType="pie"
-            />
+            /> */}
 
             <Card>
               <CardHeader>
-                <CardTitle>Monthly Leave Trends</CardTitle>
-                <CardDescription>Leave requests over the past 6 months</CardDescription>
+                <CardTitle className="flex items-center justify-between">
+                  Monthly Leave Trends
+                  {monthlyTrendsLoading && (
+                    <div className="flex items-center text-sm text-muted-foreground">
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary mr-2"></div>
+                      Loading...
+                    </div>
+                  )}
+                </CardTitle>
+                <CardDescription>
+                  {monthlyTrendsError ? (
+                    <span className="text-red-500">⚠️ {monthlyTrendsError}</span>
+                  ) : (
+                    `Leave requests over the past 6 months (${monthlyLeaveData.length > 0 ? 
+                      `${monthlyLeaveData[0]?.month} - ${monthlyLeaveData[monthlyLeaveData.length - 1]?.month}` : 
+                      'Current + 5 previous months'})`
+                  )}
+                </CardDescription>
               </CardHeader>
               <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={monthlyLeaveData}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="month" />
-                    <YAxis />
-                    <Tooltip />
-                    <Bar dataKey="approved" fill="#10b981" name="Approved" />
-                    <Bar dataKey="pending" fill="#f59e0b" name="Pending" />
-                    <Bar dataKey="rejected" fill="#ef4444" name="Rejected" />
-                  </BarChart>
-                </ResponsiveContainer>
+                {monthlyTrendsLoading ? (
+                  <div className="flex items-center justify-center h-[300px]">
+                    <div className="text-center">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-2"></div>
+                      <p className="text-muted-foreground">Loading monthly trends...</p>
+                    </div>
+                  </div>
+                ) : monthlyTrendsError ? (
+                  <div className="flex items-center justify-center h-[300px]">
+                    <div className="text-center">
+                      <AlertCircle className="h-8 w-8 text-red-500 mx-auto mb-2" />
+                      <p className="text-red-500 mb-2">Failed to load trends</p>
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        onClick={fetchMonthlyTrends}
+                        className="text-xs"
+                      >
+                        Retry
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={monthlyLeaveData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="month" />
+                      <YAxis />
+                      <Tooltip 
+                        formatter={(value, name) => [value, name === 'approved' ? 'Total Leaves' : name]}
+                        labelFormatter={(label) => `Month: ${label}`}
+                      />
+                      <Bar dataKey="approved" fill="#10b981" name="Total Leaves" />
+                      {/* Hide pending/rejected for now since backend only returns total count */}
+                      {/* <Bar dataKey="pending" fill="#f59e0b" name="Pending" />
+                      <Bar dataKey="rejected" fill="#ef4444" name="Rejected" /> */}
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -1990,12 +2113,20 @@ const LeaveManagement = () => {
                     }}
                     value=""
                   >
-                    <option value="">Select employee to notify...</option>
-                    {employees.filter(emp => !isSelfEmployee(emp)).map(employee => (
-                      <option key={employee.id} value={employee.id}>
-                        {employee.name}
-                      </option>
-                    ))}
+                    <option value="">
+                      {!employees || employees.length === 0 
+                        ? "Loading employees..." 
+                        : "Select employee to notify..."}
+                    </option>
+                    {employees && employees.length > 0 ? (
+                      employees.filter(emp => !isSelfEmployee(emp)).map(employee => (
+                        <option key={employee.id} value={employee.id}>
+                          {employee.name} ({employee.employeeId})
+                        </option>
+                      ))
+                    ) : (
+                      <option value="" disabled>No employees available</option>
+                    )}
                   </select>
                 </div>
                 
@@ -2050,16 +2181,24 @@ const LeaveManagement = () => {
                     }}
                     value=""
                   >
-                    <option value="">Select additional employees to notify...</option>
-                    {employees.filter(emp => 
-                      !isSelfEmployee(emp) && 
-                      !leaveForm.toEmployees.find(to => to.id === emp.id) &&
-                      !leaveForm.ccEmployees.find(cc => cc.id === emp.id)
-                    ).map(employee => (
-                      <option key={employee.id} value={employee.id}>
-                        {employee.name}
-                      </option>
-                    ))}
+                    <option value="">
+                      {!employees || employees.length === 0 
+                        ? "Loading employees..." 
+                        : "Select additional employees to notify..."}
+                    </option>
+                    {employees && employees.length > 0 ? (
+                      employees.filter(emp => 
+                        !isSelfEmployee(emp) && 
+                        !leaveForm.toEmployees.find(to => to.id === emp.id) &&
+                        !leaveForm.ccEmployees.find(cc => cc.id === emp.id)
+                      ).map(employee => (
+                        <option key={employee.id} value={employee.id}>
+                          {employee.name} ({employee.employeeId})
+                        </option>
+                      ))
+                    ) : (
+                      <option value="" disabled>No employees available</option>
+                    )}
                   </select>
                 </div>
                 
@@ -2543,6 +2682,7 @@ const LeaveManagement = () => {
                 </select>
               </div>
 
+              {/* Credits Field */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Credits (Days)
@@ -2552,22 +2692,67 @@ const LeaveManagement = () => {
                   min="1"
                   max="10"
                   value={compensatoryForm.credits}
-                  onChange={(e) => setCompensatoryForm(prev => ({ ...prev, credits: e.target.value }))}
+                  onChange={(e) => setCompensatoryForm(prev => ({ ...prev, credits: parseInt(e.target.value) }))}
                   placeholder="Enter number of days"
                   required
                 />
               </div>
 
+              {/* TO Field */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  To *
+                  {(!employees || employees.length === 0) && (
+                    <button
+                      type="button"
+                      onClick={fetchEmployees}
+                      className="ml-2 text-xs text-blue-600 hover:text-blue-800 underline"
+                    >
+                      Reload employees
+                    </button>
+                  )}
+                </label>
+                <select
+                  value={compensatoryForm.to}
+                  onChange={(e) => setCompensatoryForm(prev => ({ ...prev, to: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+                  required
+                >
+                  <option value="">Select To</option>
+                  {employees
+                    .filter(emp => String(emp?.department || '').toLowerCase() === 'engineering')
+                    .map((emp) => (
+                      <option key={emp.id} value={emp.id}>
+                        {emp.name} ({emp.employeeId}) - {emp.department}
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              {/* Reason Field */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Reason
                 </label>
-                <textarea
+                <Input
+                  type="text"
                   value={compensatoryForm.reason}
                   onChange={(e) => setCompensatoryForm(prev => ({ ...prev, reason: e.target.value }))}
-                  placeholder="Reason for compensatory leave (e.g., weekend work, overtime)"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
-                  rows="3"
+                  placeholder="Enter reason for compensatory leave"
+                  required
+                />
+              </div>
+
+              {/* Assigned Date Field */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Assigned Date
+                </label>
+                <Input
+                  type="date"
+                  value={compensatoryForm.assignedDate}
+                  onChange={(e) => setCompensatoryForm(prev => ({ ...prev, assignedDate: e.target.value }))}
+                  max={new Date().toISOString().split('T')[0]}
                   required
                 />
               </div>

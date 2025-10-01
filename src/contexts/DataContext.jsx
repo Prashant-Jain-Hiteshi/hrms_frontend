@@ -53,9 +53,21 @@ const DataProvider = ({ children }) => {
     try {
       setEmployeesLoading(true);
       setEmployeesError(null);
-      const response = await EmployeesAPI.list();
-      const employeeData = Array.isArray(response.data) ? response.data : 
-                          (response.data?.rows ? response.data.rows : []);
+      
+      // Try new paginated API first, fallback to old API
+      let response;
+      try {
+        response = await EmployeesAPI.listPaginated({ limit: 100 });
+      } catch (err) {
+        console.log('Paginated API failed, trying old API:', err.message);
+        response = await EmployeesAPI.list();
+      }
+      
+      // Handle both new and old response formats
+      const employeeData = response.data?.employees || // New format
+                          (Array.isArray(response.data) ? response.data : // Old format array
+                           (response.data?.rows ? response.data.rows : [])); // Old format with rows
+      
       setEmployees(employeeData);
       return employeeData;
     } catch (error) {

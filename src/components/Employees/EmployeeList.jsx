@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
@@ -14,21 +14,42 @@ import { useAuth } from '../../contexts/AuthContext';
 import { EmployeesAPI } from '../../lib/api';
 
 const EmployeeList = () => {
-  const { employees, addEmployee, updateEmployee, deleteEmployee, fetchEmployees } = useData();
+  const { addEmployee, updateEmployee, deleteEmployee } = useData();
   const { user, hasPermission } = useAuth();
   const { toast } = useToast();
   
   // Enhanced role-based access control - only HR and Admin can manage employees
   const canManage = user?.role === 'admin' || user?.role === 'hr' || hasPermission('manage_employees');
   
+  // Pagination and filtering state
+  const [employees, setEmployees] = useState([]);
+  const [pagination, setPagination] = useState({
+    currentPage: 1,
+    totalPages: 0,
+    totalRecords: 0,
+    limit: 10,
+    hasNext: false,
+    hasPrev: false,
+  });
+  const [filters, setFilters] = useState({
+    departments: [],
+    statuses: [],
+  });
+  const [loading, setLoading] = useState(false);
+  
+  // Search and filter state
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedDepartment, setSelectedDepartment] = useState('all');
-  const [selectedStatus, setSelectedStatus] = useState('all');
+  const [selectedDepartment, setSelectedDepartment] = useState('');
+  const [selectedStatus, setSelectedStatus] = useState('');
+  const [sortBy, setSortBy] = useState('joiningDate');
+  const [sortOrder, setSortOrder] = useState('desc');
+  
+  // Modal state
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   
-  // New state for delete confirmation modal
+  // Delete confirmation modal state
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [employeeToDelete, setEmployeeToDelete] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -36,16 +57,71 @@ const EmployeeList = () => {
   const [isAdding, setIsAdding] = useState(false);
   const [deleteError, setDeleteError] = useState('');
 
-  const filteredEmployees = employees.filter(employee => {
-    const matchesSearch = employee.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         employee.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         employee.employeeId.toLowerCase().includes(searchTerm.toLowerCase());
-    
-    const matchesDepartment = selectedDepartment === 'all' || employee.department === selectedDepartment;
-    const matchesStatus = selectedStatus === 'all' || employee.status === selectedStatus;
-    
-    return matchesSearch && matchesDepartment && matchesStatus;
-  });
+  // Fetch employees with pagination and filters
+  const fetchEmployees = async (page = 1) => {
+    try {
+      setLoading(true);
+      
+      const params = {
+        page,
+        limit: 10,
+        search: searchTerm,
+        department: selectedDepartment,
+        status: selectedStatus,
+        sortBy,
+        sortOrder,
+      };
+
+      const response = await EmployeesAPI.listPaginated(params);
+      const data = response.data;
+
+      if (data.employees) {
+        setEmployees(data.employees);
+        setPagination(data.pagination);
+        setFilters(data.filters);
+      } else {
+        // Fallback for old API response format
+        setEmployees(Array.isArray(data) ? data : data.rows || []);
+        setPagination({
+          currentPage: page,
+          totalPages: 1,
+          totalRecords: Array.isArray(data) ? data.length : data.count || 0,
+          limit: 10,
+          hasNext: false,
+          hasPrev: false,
+        });
+      }
+    } catch (error) {
+      console.error('Error loading employees:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load employees. Please refresh the page.",
+        variant: "destructive"
+      });
+      setEmployees([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Load employees when component mounts or filters change
+  useEffect(() => {
+    fetchEmployees(1);
+  }, [searchTerm, selectedDepartment, selectedStatus, sortBy, sortOrder]);
+
+  // Debounced search
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      if (pagination.currentPage !== 1) {
+        fetchEmployees(1); // Reset to first page when searching
+      }
+    }, 500);
+
+    return () => clearTimeout(timeoutId);
+  }, [searchTerm]);
+
+  // No need for frontend filtering - handled by backend
+  const filteredEmployees = employees;
 
   const handleAddEmployee = async (employeeData) => {
     if (!canManage) {
@@ -83,7 +159,6 @@ const EmployeeList = () => {
     
     setIsUpdating(true);
     try {
-      // Use API directly for better error handling
       await EmployeesAPI.update(selectedEmployee.id, employeeData);
       
       // Update local state through context
@@ -93,9 +168,7 @@ const EmployeeList = () => {
       setSelectedEmployee(null);
       
       // Refresh employee list to ensure consistency
-      if (fetchEmployees) {
-        await fetchEmployees();
-      }
+      await fetchEmployees(pagination.currentPage);
       
       // Show success toast
       toast.success(`Employee "${employeeData.name}" has been updated successfully!`, 5000);
@@ -132,9 +205,7 @@ const EmployeeList = () => {
       setEmployeeToDelete(null);
       
       // Refresh employee list to ensure consistency
-      if (fetchEmployees) {
-        await fetchEmployees();
-      }
+      await fetchEmployees(pagination.currentPage);
       
       console.log('Employee deleted successfully!');
       toast.success(`Employee "${employeeToDelete.name}" has been deleted successfully!`, 5000);
@@ -194,9 +265,9 @@ const EmployeeList = () => {
               onChange={(e) => setSelectedDepartment(e.target.value)}
               className="px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-md bg-background text-foreground"
             >
-              <option value="all">All Departments</option>
-              {MOCK_DEPARTMENTS.map(dept => (
-                <option key={dept.id} value={dept.name}>{dept.name}</option>
+              <option value="">All Departments</option>
+              {filters.departments.map(dept => (
+                <option key={dept} value={dept}>{dept}</option>
               ))}
             </select>
             <select
@@ -204,9 +275,10 @@ const EmployeeList = () => {
               onChange={(e) => setSelectedStatus(e.target.value)}
               className="px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-md bg-background text-foreground"
             >
-              <option value="all">All Status</option>
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
+              <option value="">All Status</option>
+              {filters.statuses.map(status => (
+                <option key={status} value={status}>{status.charAt(0).toUpperCase() + status.slice(1)}</option>
+              ))}
             </select>
             <Button variant="outline" className="flex items-center space-x-2" onClick={() => console.log('Filter functionality coming soon!')}>
               <Filter className="h-4 w-4" />
@@ -221,7 +293,7 @@ const EmployeeList = () => {
         <Card>
           <CardContent className="pt-6">
             <div className="text-center">
-              <div className="text-2xl font-bold text-primary">{employees.length}</div>
+              <div className="text-2xl font-bold text-primary">{pagination.totalRecords}</div>
               <div className="text-sm text-muted-foreground">Total Employees</div>
             </div>
           </CardContent>
@@ -363,6 +435,78 @@ const EmployeeList = () => {
           </div>
         </CardContent>
       </Card>
+
+      {/* Pagination Controls */}
+      {pagination.totalPages > 1 && (
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-between">
+              <div className="text-sm text-muted-foreground">
+                Showing {((pagination.currentPage - 1) * pagination.limit) + 1} to{' '}
+                {Math.min(pagination.currentPage * pagination.limit, pagination.totalRecords)} of{' '}
+                {pagination.totalRecords} employees
+              </div>
+              <div className="flex items-center space-x-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => fetchEmployees(pagination.currentPage - 1)}
+                  disabled={!pagination.hasPrev || loading}
+                >
+                  Previous
+                </Button>
+                <div className="flex items-center space-x-1">
+                  {Array.from({ length: Math.min(5, pagination.totalPages) }, (_, i) => {
+                    let pageNum;
+                    if (pagination.totalPages <= 5) {
+                      pageNum = i + 1;
+                    } else if (pagination.currentPage <= 3) {
+                      pageNum = i + 1;
+                    } else if (pagination.currentPage >= pagination.totalPages - 2) {
+                      pageNum = pagination.totalPages - 4 + i;
+                    } else {
+                      pageNum = pagination.currentPage - 2 + i;
+                    }
+                    
+                    return (
+                      <Button
+                        key={pageNum}
+                        variant={pageNum === pagination.currentPage ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => fetchEmployees(pageNum)}
+                        disabled={loading}
+                        className="w-8 h-8 p-0"
+                      >
+                        {pageNum}
+                      </Button>
+                    );
+                  })}
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => fetchEmployees(pagination.currentPage + 1)}
+                  disabled={!pagination.hasNext || loading}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Loading State */}
+      {loading && (
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <span className="ml-2 text-muted-foreground">Loading employees...</span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Add Employee Modal */}
       <EmployeeModal

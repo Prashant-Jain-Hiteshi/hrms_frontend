@@ -71,8 +71,6 @@ export const AuthProvider = ({ children }) => {
   const logout = () => {
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
-    // Clear dashboard refresh flag so next login will trigger refresh
-    sessionStorage.removeItem('dashboard_refreshed');
     setUser(null);
   };
 
