@@ -18,7 +18,7 @@ import {
   XCircle
 } from 'lucide-react';
 
-const PayrollProgressChart = ({ payrollData = [], onRefresh = null }) => {
+const PayrollProgressChart = ({ payrollData = [], bankTransferData = [], totalEmployeeCount = 0, onRefresh = null }) => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   
   const handleRefresh = async () => {
@@ -32,40 +32,163 @@ const PayrollProgressChart = ({ payrollData = [], onRefresh = null }) => {
     }
   };
 
-  // Calculate progress statistics
-  const progress = useMemo(() => {
-    if (!payrollData || !payrollData.length) {
+  // Dynamic pipeline status determination based on payroll and bank transfer data
+  const getDynamicPipelineStatus = useMemo(() => {
+    // Use totalEmployeeCount if provided, otherwise fall back to payroll data length
+    const totalEmployees = totalEmployeeCount > 0 ? totalEmployeeCount : (payrollData?.length || 0);
+    
+    if (totalEmployees === 0) {
       return {
-        total: 0,
-        pending: 0,
-        processed: 0,
-        paid: 0,
-        cancelled: 0,
-        pendingPercentage: 0,
-        processedPercentage: 0,
-        paidPercentage: 0,
-        cancelledPercentage: 0
+        calculation: { completed: false, current: false, total: 0 },
+        review: { completed: false, current: false, total: 0 },
+        approval: { completed: false, current: false, total: 0 },
+        payment: { completed: false, current: false, total: 0 },
+        totalEmployees: 0,
+        completionPercentage: 0
       };
     }
 
-    const total = payrollData.length;
-    const pending = payrollData.filter(p => p.status === 'pending').length;
-    const processed = payrollData.filter(p => p.status === 'processed').length;
-    const paid = payrollData.filter(p => p.status === 'paid').length;
-    const cancelled = payrollData.filter(p => p.status === 'cancelled').length;
+    // Create a map of bank transfer data by payroll record ID for quick lookup
+    const bankTransferMap = {};
+    if (bankTransferData && bankTransferData.length) {
+      bankTransferData.forEach(transfer => {
+        if (transfer.payrollRecordId) {
+          bankTransferMap[transfer.payrollRecordId] = transfer;
+        }
+      });
+    }
+
+    let calculationCompleted = 0;
+    let reviewCompleted = 0;
+    let approvalCompleted = 0;
+    let paymentCompleted = 0;
+
+    // Count completed stages based on payroll records that exist
+    if (payrollData && payrollData.length > 0) {
+      payrollData.forEach(record => {
+        const bankDetails = bankTransferMap[record.id];
+        
+        // Stage 1: Calculation - if status is CALCULATED or higher
+        if (['CALCULATED', 'HR_APPROVED', 'FINANCE_APPROVED'].includes(record.status)) {
+          calculationCompleted++;
+        }
+        
+        // Stage 2: Review - if status is HR_APPROVED or higher
+        if (['HR_APPROVED', 'FINANCE_APPROVED'].includes(record.status)) {
+          reviewCompleted++;
+        }
+        
+        // Stage 3: Approval - if status is FINANCE_APPROVED
+        if (record.status === 'FINANCE_APPROVED') {
+          approvalCompleted++;
+        }
+        
+        // Stage 4: Payment - if bank transfer status is COMPLETED
+        if (bankDetails && bankDetails.transferStatus === 'COMPLETED') {
+          paymentCompleted++;
+        }
+      });
+    }
+
+    const completionPercentage = totalEmployees > 0 ? Math.round((paymentCompleted / totalEmployees) * 100) : 0;
+
+    const pipelineStatus = {
+      calculation: { 
+        completed: calculationCompleted === totalEmployees && totalEmployees > 0, 
+        current: calculationCompleted < totalEmployees && calculationCompleted > 0,
+        total: calculationCompleted 
+      },
+      review: { 
+        completed: reviewCompleted === totalEmployees && totalEmployees > 0, 
+        current: calculationCompleted === totalEmployees && reviewCompleted < totalEmployees,
+        total: reviewCompleted 
+      },
+      approval: { 
+        completed: approvalCompleted === totalEmployees && totalEmployees > 0, 
+        current: reviewCompleted === totalEmployees && approvalCompleted < totalEmployees,
+        total: approvalCompleted 
+      },
+      payment: { 
+        completed: paymentCompleted === totalEmployees && totalEmployees > 0, 
+        current: approvalCompleted === totalEmployees && paymentCompleted < totalEmployees,
+        total: paymentCompleted 
+      },
+      totalEmployees: totalEmployees,
+      completionPercentage
+    };
+
+    // Debug logging for pipeline status
+    console.log('🔍 DEBUG - Dynamic Pipeline Status:', {
+      totalEmployees: totalEmployees,
+      calculationCompleted,
+      reviewCompleted,
+      approvalCompleted,
+      paymentCompleted,
+      completionPercentage,
+      pipelineStatus,
+      payrollDataSample: payrollData?.slice(0, 2),
+      bankTransferDataSample: bankTransferData?.slice(0, 2)
+    });
+
+    return pipelineStatus;
+  }, [payrollData, bankTransferData, totalEmployeeCount]);
+
+  // Calculate progress statistics based on actual payroll statuses
+  const progress = useMemo(() => {
+    const totalEmployees = totalEmployeeCount > 0 ? totalEmployeeCount : (payrollData?.length || 0);
+    
+    if (totalEmployees === 0) {
+      return {
+        total: 0,
+        calculated: 0,
+        hrApproved: 0,
+        financeApproved: 0,
+        paid: 0,
+        calculatedPercentage: 0,
+        hrApprovedPercentage: 0,
+        financeApprovedPercentage: 0,
+        paidPercentage: 0
+      };
+    }
+    let calculated = 0;
+    let hrApproved = 0;
+    let financeApproved = 0;
+    let paid = 0;
+
+    // Count based on existing payroll records
+    if (payrollData && payrollData.length > 0) {
+      calculated = payrollData.filter(p => ['CALCULATED', 'HR_APPROVED', 'FINANCE_APPROVED'].includes(p.status)).length;
+      hrApproved = payrollData.filter(p => ['HR_APPROVED', 'FINANCE_APPROVED'].includes(p.status)).length;
+      financeApproved = payrollData.filter(p => p.status === 'FINANCE_APPROVED').length;
+      
+      // Count paid based on bank transfer completion
+      const bankTransferMap = {};
+      if (bankTransferData && bankTransferData.length) {
+        bankTransferData.forEach(transfer => {
+          if (transfer.payrollRecordId) {
+            bankTransferMap[transfer.payrollRecordId] = transfer;
+          }
+        });
+      }
+      
+      paid = payrollData.filter(p => {
+        const bankDetails = bankTransferMap[p.id];
+        return bankDetails && bankDetails.transferStatus === 'COMPLETED';
+      }).length;
+    }
 
     return {
-      total,
-      pending,
-      processed,
+      total: totalEmployees,
+      calculated,
+      hrApproved,
+      financeApproved,
       paid,
-      cancelled,
-      pendingPercentage: total > 0 ? (pending / total) * 100 : 0,
-      processedPercentage: total > 0 ? (processed / total) * 100 : 0,
-      paidPercentage: total > 0 ? (paid / total) * 100 : 0,
-      cancelledPercentage: total > 0 ? (cancelled / total) * 100 : 0
+      calculatedPercentage: totalEmployees > 0 ? (calculated / totalEmployees) * 100 : 0,
+      hrApprovedPercentage: totalEmployees > 0 ? (hrApproved / totalEmployees) * 100 : 0,
+      financeApprovedPercentage: totalEmployees > 0 ? (financeApproved / totalEmployees) * 100 : 0,
+      paidPercentage: totalEmployees > 0 ? (paid / totalEmployees) * 100 : 0
     };
-  }, [payrollData]);
+  }, [payrollData, bankTransferData, totalEmployeeCount]);
 
   const ProgressBar = ({ label, value, percentage, color, icon: Icon }) => (
     <div className="space-y-2">
@@ -95,12 +218,12 @@ const PayrollProgressChart = ({ payrollData = [], onRefresh = null }) => {
   );
 
   const SummaryCards = () => (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 mb-4 sm:mb-6">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-3 sm:gap-4 mb-4 sm:mb-6">
       <div className="bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 p-3 sm:p-4 rounded-lg border border-blue-200 dark:border-blue-800">
         <div className="flex items-center justify-between">
           <div className="min-w-0 flex-1">
             <p className="text-xs sm:text-sm font-medium text-blue-600 dark:text-blue-400 truncate">Total Employees</p>
-            <p className="text-lg sm:text-2xl font-bold text-blue-700 dark:text-blue-300">{progress.total}</p>
+            <p className="text-lg sm:text-2xl font-bold text-blue-700 dark:text-blue-300">{getDynamicPipelineStatus.totalEmployees}</p>
           </div>
           <Users className="h-6 w-6 sm:h-8 sm:w-8 text-blue-500 flex-shrink-0" />
         </div>
@@ -109,26 +232,14 @@ const PayrollProgressChart = ({ payrollData = [], onRefresh = null }) => {
       <div className="bg-gradient-to-br from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 p-3 sm:p-4 rounded-lg border border-green-200 dark:border-green-800">
         <div className="flex items-center justify-between">
           <div className="min-w-0 flex-1">
-            <p className="text-xs sm:text-sm font-medium text-green-600 dark:text-green-400 truncate">Completion Rate</p>
+            <p className="text-xs sm:text-sm font-medium text-green-600 dark:text-green-400 truncate">Completion</p>
             <p className="text-lg sm:text-2xl font-bold text-green-700 dark:text-green-300">
-              {progress.total > 0 ? Math.round((progress.paid / progress.total) * 100) : 0}%
+              {getDynamicPipelineStatus.completionPercentage}%
             </p>
           </div>
           <TrendingUp className="h-6 w-6 sm:h-8 sm:w-8 text-green-500 flex-shrink-0" />
         </div>
       </div>
-
-      {/* <div className="bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/20 p-3 sm:p-4 rounded-lg border border-purple-200 dark:border-purple-800">
-        <div className="flex items-center justify-between">
-          <div className="min-w-0 flex-1">
-            <p className="text-xs sm:text-sm font-medium text-purple-600 dark:text-purple-400 truncate">Total Amount</p>
-            <p className="text-lg sm:text-2xl font-bold text-purple-700 dark:text-purple-300">
-              ${(progress.total * 5000).toLocaleString()}
-            </p>
-          </div>
-          <DollarSign className="h-6 w-6 sm:h-8 sm:w-8 text-purple-500 flex-shrink-0" />
-        </div>
-      </div> */}
     </div>
   );
 
@@ -251,15 +362,44 @@ const PayrollProgressChart = ({ payrollData = [], onRefresh = null }) => {
     </div>
   );
 
+  // Dynamic processing stages based on actual payroll and bank transfer status
   const processingStages = [
-    { name: 'Calculation', description: 'Payroll data is being calculated', status: 'completed', icon: Calculator },
-    { name: 'Review', description: 'Payroll data is being reviewed', status: progress.processed > 0 ? 'active' : 'pending', icon: Eye },
-    { name: 'Approval', description: 'Payroll data is being approved', status: progress.paid > 0 ? 'active' : 'pending', icon: CreditCard },
-    { name: 'Payment', description: 'Payroll data is being paid', status: progress.paid === progress.total && progress.total > 0 ? 'completed' : 'pending', icon: Users }
+    { 
+      name: 'Calculation', 
+      description: 'Payroll data is being calculated', 
+      status: getDynamicPipelineStatus.calculation.completed ? 'completed' : 
+              getDynamicPipelineStatus.calculation.current ? 'active' : 'pending',
+      icon: Calculator,
+      count: getDynamicPipelineStatus.calculation.total
+    },
+    { 
+      name: 'Review', 
+      description: 'Payroll data is being reviewed', 
+      status: getDynamicPipelineStatus.review.completed ? 'completed' : 
+              getDynamicPipelineStatus.review.current ? 'active' : 'pending',
+      icon: Eye,
+      count: getDynamicPipelineStatus.review.total
+    },
+    { 
+      name: 'Approval', 
+      description: 'Payroll data is being approved', 
+      status: getDynamicPipelineStatus.approval.completed ? 'completed' : 
+              getDynamicPipelineStatus.approval.current ? 'active' : 'pending',
+      icon: CheckCircle,
+      count: getDynamicPipelineStatus.approval.total
+    },
+    { 
+      name: 'Payment', 
+      description: 'Payroll data is being paid', 
+      status: getDynamicPipelineStatus.payment.completed ? 'completed' : 
+              getDynamicPipelineStatus.payment.current ? 'active' : 'pending',
+      icon: Users,
+      count: getDynamicPipelineStatus.payment.total
+    }
   ];
 
-  const overallProgress = progress.paid / progress.total * 100;
-  const totalEmployees = payrollData.length;
+  const overallProgress = getDynamicPipelineStatus.completionPercentage;
+  const totalEmployees = getDynamicPipelineStatus.totalEmployees;
 
   return (
     <Card className="w-full">
@@ -331,6 +471,14 @@ const PayrollProgressChart = ({ payrollData = [], onRefresh = null }) => {
                   <p className="text-xs text-gray-600 dark:text-gray-400 leading-tight">
                     {stage.description}
                   </p>
+                  <div className="mt-2 text-xs font-semibold">
+                    <span className={`${
+                      stage.status === 'completed' ? 'text-green-600' :
+                      stage.status === 'active' ? 'text-blue-600' : 'text-gray-400'
+                    }`}>
+                      {stage.count}/{totalEmployees}
+                    </span>
+                  </div>
                 </div>
                 {index < processingStages.length - 1 && (
                   <div className="hidden lg:block absolute top-1/2 -right-2 transform -translate-y-1/2 z-10">
@@ -351,35 +499,33 @@ const PayrollProgressChart = ({ payrollData = [], onRefresh = null }) => {
             Status Breakdown
           </h4>
           <ProgressBar
-            label="Pending"
-            value={progress.pending}
-            percentage={progress.pendingPercentage}
-            color="text-yellow-500"
-            icon={Clock}
+            label="Calculated"
+            value={progress.calculated}
+            percentage={progress.calculatedPercentage}
+            color="text-blue-500"
+            icon={Calculator}
           />
           <ProgressBar
-            label="Processed"
-            value={progress.processed}
-            percentage={progress.processedPercentage}
-            color="text-blue-500"
-            icon={AlertCircle}
+            label="HR Approved"
+            value={progress.hrApproved}
+            percentage={progress.hrApprovedPercentage}
+            color="text-yellow-500"
+            icon={Eye}
+          />
+          <ProgressBar
+            label="Finance Approved"
+            value={progress.financeApproved}
+            percentage={progress.financeApprovedPercentage}
+            color="text-purple-500"
+            icon={CheckCircle}
           />
           <ProgressBar
             label="Paid"
             value={progress.paid}
             percentage={progress.paidPercentage}
             color="text-green-500"
-            icon={CheckCircle}
+            icon={CreditCard}
           />
-          {progress.cancelled > 0 && (
-            <ProgressBar
-              label="Cancelled"
-              value={progress.cancelled}
-              percentage={progress.cancelledPercentage}
-              color="text-red-500"
-              icon={XCircle}
-            />
-          )}
         </div>
         {/* Overall Progress */}
         <div className="space-y-3 sm:space-y-4">

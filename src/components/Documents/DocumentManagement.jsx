@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { useAuth } from '../../contexts/AuthContext';
 import { useData } from '../../contexts/DataContext';
+import { useEmployeeMode } from '../../hooks/useEmployeeMode';
 import { 
   FileText, 
   Upload, 
@@ -34,6 +35,7 @@ import { api } from '../../lib/api';
 
 const DocumentManagement = () => {
   const { user } = useAuth();
+  const { isEmployeeMode, effectiveRole } = useEmployeeMode();
   const { toast } = useToast();
   const { 
     documents, 

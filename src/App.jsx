@@ -33,6 +33,11 @@ const DashboardRouter = () => {
   return getDashboardComponent();
 };
 
+// Employee Dashboard Router (for HR users accessing employee portal)
+const EmployeeDashboardRouter = () => {
+  return <EmployeeDashboard />;
+};
+
 // Import Employee Management
 import EmployeeList from './components/Employees/EmployeeList';
 import AttendanceManagement from './components/Attendance/AttendanceManagement';
@@ -76,6 +81,13 @@ function App() {
                 <Route path="documents" element={<DocumentManagement />} />
                 <Route path="reports" element={<ReportsManagement />} />
                 <Route path="settings" element={<SettingsManagement />} />
+                
+                {/* Employee Portal Routes (for HR users to access employee view) */}
+                <Route path="employee/dashboard" element={<EmployeeDashboardRouter />} />
+                <Route path="employee/attendance" element={<AttendanceManagement />} />
+                <Route path="employee/leave" element={<LeaveManagement />} />
+                <Route path="employee/documents" element={<DocumentManagement />} />
+                
                 <Route path="test" element={<div className="p-6"><h1 className="text-2xl font-bold">Test Page</h1><p>This is a test page to verify routing works.</p></div>} />
               </Route>
             </Routes>

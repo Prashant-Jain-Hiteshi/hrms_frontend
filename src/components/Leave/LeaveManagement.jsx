@@ -9,6 +9,7 @@ import {
 import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
 import { useAuth } from '../../contexts/AuthContext';
 import { useData } from '../../contexts/DataContext';
+import { useEmployeeMode } from '../../hooks/useEmployeeMode';
 import { LeaveAPI } from '../../lib/leaveApi';
 import { AttendanceAPI, LeaveAPI as MainLeaveAPI } from '../../lib/api';
 import { CalendarAPI } from '../../lib/api';
@@ -18,6 +19,7 @@ import LeaveTypesChart from './LeaveTypesChart';
 
 const LeaveManagement = () => {
   const { user } = useAuth();
+  const { isEmployeeMode, effectiveRole } = useEmployeeMode();
   const { leaveRequests, addLeaveRequest, approveLeave, rejectLeave, cancelLeave, employees, leaveTypes, fetchLeaveBalance, fetchEmployees, myAttendance, monthlyCreditTotal, monthlyCreditAnnual } = useData();
   const [selectedTab, setSelectedTab] = useState('overview');
   const [searchTerm, setSearchTerm] = useState('');
@@ -110,13 +112,13 @@ const LeaveManagement = () => {
     expiryDate: ''
   });
 
-  // Role and tabs
-  const role = String(user?.role || '').toLowerCase();
-  const isHR = role === 'hr';
-  const isAdmin = role === 'admin';
+  // Role and tabs (use effectiveRole for employee mode)
+  const role = String(effectiveRole || '').toLowerCase();
+  const isHR = role === 'hr' && !isEmployeeMode; // HR in management mode
+  const isAdmin = role === 'admin' && !isEmployeeMode; // Admin in management mode
   const tabs = (() => {
+    if (effectiveRole === 'employee') return ['overview', 'requests', 'mentions', 'leavebalance', 'policies'];
     if (isHR) return ['overview', 'mentions', 'compensatory', 'policies'];
-    if (role === 'employee') return ['overview', 'requests', 'mentions', 'leavebalance', 'policies'];
     // Admin: no Requests tab and no Leave Balance
     return ['overview', 'mentions', 'policies', 'calendar'];
   })();
@@ -408,10 +410,10 @@ const LeaveManagement = () => {
 
   // Prevent non-employees (HR/Admin) from accessing Leave Balance tab
   useEffect(() => {
-    if (selectedTab === 'leavebalance' && role !== 'employee') {
+    if (selectedTab === 'leavebalance' && effectiveRole !== 'employee') {
       setSelectedTab('overview');
     }
-  }, [selectedTab, role]);
+  }, [selectedTab, effectiveRole]);
 
   // 🚀 Load monthly trends when overview tab is selected (Admin/HR only)
   useEffect(() => {
@@ -885,7 +887,7 @@ const LeaveManagement = () => {
     }
   }, [user?.employeeId, fetchLeaveBalance]);
 
-  const filteredLeaveRequests = user?.role === 'employee' 
+  const filteredLeaveRequests = effectiveRole === 'employee' 
     ? leaveRequests.filter(request => 
         request.employeeId === user.employeeId || 
         request.employeeId === user.id || 
@@ -1330,7 +1332,7 @@ const LeaveManagement = () => {
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Leave Management</h1>
           <p className="text-gray-600 dark:text-gray-400">Manage leave requests and policies</p>
         </div>
-        {user?.role === 'employee' && (
+        {effectiveRole === 'employee' && (
           <Button onClick={() => setShowApplyForm(true)} className="flex items-center space-x-2">
             <Plus className="h-4 w-4" />
             <span>Apply Leave</span>
@@ -1360,7 +1362,7 @@ const LeaveManagement = () => {
       </div>
 
       {/* Leave Balance Tab (Employee only) */}
-      {selectedTab === 'leavebalance' && role === 'employee' && (
+      {selectedTab === 'leavebalance' && effectiveRole === 'employee' && (
         <div className="space-y-6">
           <Card>
             <CardHeader>
@@ -1692,7 +1694,7 @@ const LeaveManagement = () => {
       {selectedTab === 'overview' && (
         <div className="space-y-6">
           {/* Leave Balance Cards - visible only for employees */}
-          {role === 'employee' && (
+          {effectiveRole === 'employee' && (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               {Object.entries(leaveBalance).map(([type, balance]) => (
                 <Card key={type}>
@@ -2673,7 +2675,13 @@ const LeaveManagement = () => {
                 >
                   <option value="">Select Employee</option>
                   {employees
-                    .filter(emp => String(emp?.department || '').toLowerCase() === 'engineering')
+                    .filter(emp => {
+                      const isActive = emp?.status === 'active';
+                      const deptRaw = emp?.department || emp?.Employee?.department || emp?.Department?.name;
+                      const dept = String(deptRaw || '').toLowerCase();
+                      const inTargetDepts = dept === 'hr' || dept === 'human resources' || dept === 'finance' || dept === 'engineering';
+                      return isActive && inTargetDepts;
+                    })
                     .map((emp) => (
                     <option key={emp.id} value={emp.id}>
                       {emp.name} ({emp.employeeId}) - {emp.department}
@@ -2682,7 +2690,6 @@ const LeaveManagement = () => {
                 </select>
               </div>
 
-              {/* Credits Field */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Credits (Days)
@@ -2692,67 +2699,22 @@ const LeaveManagement = () => {
                   min="1"
                   max="10"
                   value={compensatoryForm.credits}
-                  onChange={(e) => setCompensatoryForm(prev => ({ ...prev, credits: parseInt(e.target.value) }))}
+                  onChange={(e) => setCompensatoryForm(prev => ({ ...prev, credits: e.target.value }))}
                   placeholder="Enter number of days"
                   required
                 />
               </div>
 
-              {/* TO Field */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  To *
-                  {(!employees || employees.length === 0) && (
-                    <button
-                      type="button"
-                      onClick={fetchEmployees}
-                      className="ml-2 text-xs text-blue-600 hover:text-blue-800 underline"
-                    >
-                      Reload employees
-                    </button>
-                  )}
-                </label>
-                <select
-                  value={compensatoryForm.to}
-                  onChange={(e) => setCompensatoryForm(prev => ({ ...prev, to: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
-                  required
-                >
-                  <option value="">Select To</option>
-                  {employees
-                    .filter(emp => String(emp?.department || '').toLowerCase() === 'engineering')
-                    .map((emp) => (
-                      <option key={emp.id} value={emp.id}>
-                        {emp.name} ({emp.employeeId}) - {emp.department}
-                      </option>
-                    ))}
-                </select>
-              </div>
-
-              {/* Reason Field */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Reason
                 </label>
-                <Input
-                  type="text"
+                <textarea
                   value={compensatoryForm.reason}
                   onChange={(e) => setCompensatoryForm(prev => ({ ...prev, reason: e.target.value }))}
-                  placeholder="Enter reason for compensatory leave"
-                  required
-                />
-              </div>
-
-              {/* Assigned Date Field */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Assigned Date
-                </label>
-                <Input
-                  type="date"
-                  value={compensatoryForm.assignedDate}
-                  onChange={(e) => setCompensatoryForm(prev => ({ ...prev, assignedDate: e.target.value }))}
-                  max={new Date().toISOString().split('T')[0]}
+                  placeholder="Reason for compensatory leave (e.g., weekend work, overtime)"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
+                  rows="3"
                   required
                 />
               </div>

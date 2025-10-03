@@ -502,13 +502,21 @@ const loadDashboardData = async () => {
 const loadHRPayrollData = async () => {
   setHrPayrollLoading(true);
   try {
-    const [recordsRes, summaryRes] = await Promise.all([
+    const [recordsRes, summaryRes, bankTransferRes] = await Promise.all([
       HRPayrollAPI.getPayrollRecords(payrollMonth),
-      HRPayrollAPI.getPayrollSummary(payrollMonth)
+      HRPayrollAPI.getPayrollSummary(payrollMonth),
+      HRPayrollAPI.getBankTransferData(payrollMonth).catch(() => ({ data: [] })) // Graceful fallback
     ]);
       
     setHrPayrollRecords(recordsRes.data || []);
     setHrPayrollSummary(summaryRes.data || null);
+    setBankTransferData(bankTransferRes.data || []);
+    
+    console.log('🔍 DEBUG - Loaded payroll data for pipeline:', {
+      payrollRecords: recordsRes.data?.length || 0,
+      bankTransfers: bankTransferRes.data?.length || 0,
+      month: payrollMonth
+    });
     } catch (error) {
       console.error('Error loading HR payroll data:', error);
       toast.error('Failed to load payroll data');
@@ -1938,7 +1946,10 @@ const loadHRPayrollData = async () => {
           {/* Charts */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <PayrollProgressChart 
-              payrollData={employeePayroll} 
+              payrollData={hrPayrollRecords} 
+              bankTransferData={bankTransferData}
+              totalEmployeeCount={employees?.length || 0}
+              onRefresh={loadHRPayrollData}
               title="Payroll Processing Progress"
             />
 

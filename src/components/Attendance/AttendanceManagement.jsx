@@ -6,6 +6,7 @@ import { Users, Clock, Timer, Search, Filter, CheckCircle, XCircle, Eye, Downloa
  
 import { useAuth } from '../../contexts/AuthContext';
 import { useData } from '../../contexts/DataContext';
+import { useEmployeeMode } from '../../hooks/useEmployeeMode';
 import { AttendanceAPI } from '../../lib/api';
 import {
   BarChart,
@@ -22,6 +23,7 @@ import {
 
 const AttendanceManagement = () => {
   const { user } = useAuth();
+  const { isEmployeeMode, effectiveRole } = useEmployeeMode();
   const {
     myAttendance,
     attendanceSummary,
@@ -625,7 +627,7 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
   // Dedicated API function for Employee Today's Attendance table ONLY
   const fetchEmployeeTableData = async () => {
     // Only for employees - admin/HR don't have this separate table UI
-    if (user?.role !== 'employee') {
+    if (effectiveRole !== 'employee') {
       return;
     }
 
@@ -679,7 +681,7 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
   const fetchCalendarData = async () => {
     setCalendarLoading(true);
     try {
-      if (user?.role === 'employee') {
+      if (effectiveRole === 'employee') {
         // For employees, fetch their own attendance data for the calendar
         const first = new Date(selectedYear, selectedMonth, 1);
         const last = new Date(selectedYear, selectedMonth + 1, 0);
@@ -716,19 +718,19 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
 
   // Separate useEffect for Employee Today's Attendance table ONLY
   useEffect(() => {
-    if (user?.role === 'employee') {
+    if (effectiveRole === 'employee') {
       fetchEmployeeTableData();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [empType, empPicker, empStatus, user]);
+  }, [empType, empPicker, empStatus, effectiveRole]);
 
-  // Keep original admin useEffect for admin/HR
+  // Keep original admin useEffect for admin/HR (only when NOT in employee mode)
   useEffect(() => {
-    if (user?.role === 'admin' || user?.role === 'hr') {
+    if ((user?.role === 'admin' || user?.role === 'hr') && !isEmployeeMode) {
       fetchAdminList();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adminType, adminPicker, adminStatus]);
+  }, [adminType, adminPicker, adminStatus, isEmployeeMode]);
 
   // Separate useEffect for calendar data fetching
   useEffect(() => {
@@ -891,7 +893,7 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
     status: r.status || (r.checkIn ? 'present' : 'absent'),
     hours: toHoursDisplay(r.hoursWorked, r.checkIn, r.checkOut)
   });
-  const isEmployee = user?.role === 'employee';
+  const isEmployee = effectiveRole === 'employee';
   // Build employee list with employee filters applied
   const employeeRecords = (() => {
     // Use the dedicated employee table data instead of shared myAttendance
@@ -946,13 +948,13 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
         return (weeklyData || []).find(d => d.name === todayName) || null;
       })()
     : null;
-  const presentTodayCount = (user?.role === 'employee')
+  const presentTodayCount = (effectiveRole === 'employee')
     ? (todayMy?.checkIn ? 1 : 0)
     : (weeklyToday ? weeklyToday.present : new Set(adminTodayPresent.map(r => r.userId || r.employeeId || r.Employee?.id || r.id)).size);
-  const absentTodayCount = (user?.role === 'employee')
+  const absentTodayCount = (effectiveRole === 'employee')
     ? (presentTodayCount ? 0 : 1)
     : (weeklyToday ? weeklyToday.absent : Math.max(0, activeEmployees.length - presentTodayCount));
-  const lateTodayCount = (user?.role === 'employee')
+  const lateTodayCount = (effectiveRole === 'employee')
     ? (todayMy?.status === 'late' ? 1 : 0)
     : (() => {
         // Compute late arrivals for Admin/HR from admin dataset for today
@@ -1239,8 +1241,8 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
           <p className="text-gray-600 dark:text-gray-400">Track and manage employee attendance</p>
         </div>
         <div className="flex space-x-3">
-          {/* Add Employee Attendance Button - Only for HR and Admin */}
-          {(user?.role === 'admin' || user?.role === 'hr') && (
+          {/* Add Employee Attendance Button - Only for HR and Admin (not in employee mode) */}
+          {(user?.role === 'admin' || user?.role === 'hr') && !isEmployeeMode && (
             <Button 
               variant="outline" 
               className="flex items-center space-x-2 bg-green-50 hover:bg-green-100 text-green-700 border-green-200" 
@@ -1260,13 +1262,13 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
               <span>Add Employee Attendance</span>
             </Button>
           )}
-          {(user?.role === 'admin' || user?.role === 'hr') && (
+          {(user?.role === 'admin' || user?.role === 'hr') && !isEmployeeMode && (
             <Button variant="outline" className="flex items-center space-x-2" onClick={handleExportAttendance}>
               <Download className="h-4 w-4" />
               <span>Export</span>
             </Button>
           )}
-          {(user?.role === 'admin' || user?.role === 'hr') && (
+          {(user?.role === 'admin' || user?.role === 'hr') && !isEmployeeMode && (
             <Button
               variant="default"
               className="flex items-center space-x-2"
@@ -1301,7 +1303,7 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
       </div>
 
       {/* Employee Self-Service Check-in/out */}
-      {user?.role === 'employee' && (
+      {effectiveRole === 'employee' && (
         <Card>
           <CardHeader>
             <CardTitle>Quick Check-in/out</CardTitle>
@@ -1346,7 +1348,7 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
       )}
 
       {/* Work Duration Timer - Only show for employees */}
-      {user?.role === 'employee' && (
+      {effectiveRole === 'employee' && (
         <Card className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border-blue-200 dark:border-blue-800">
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
@@ -1420,7 +1422,7 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-red-600">{absentTodayCount}</div>
-            <p className="text-xs text-muted-foreground">Active employees: {user?.role === 'employee' ? 1 : activeEmployees.length}</p>
+            <p className="text-xs text-muted-foreground">Active employees: {effectiveRole === 'employee' ? 1 : activeEmployees.length}</p>
           </CardContent>
         </Card>
 
@@ -1458,7 +1460,7 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
       </div>
 
       {/* Charts: HR/Admin overview (reuse Admin Dashboard design) */}
-      {(user?.role === 'admin' || user?.role === 'hr') && (
+      {(user?.role === 'admin' || user?.role === 'hr') && !isEmployeeMode && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Weekly Attendance */}
           <Card>
@@ -1531,7 +1533,7 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
               />
             </div>
             {/* Admin filters */}
-            {user?.role !== 'employee' && (
+            {effectiveRole !== 'employee' && (
               <div className="flex items-center gap-3 flex-nowrap">
                 <div className="flex items-center gap-2">
                   <label className="text-sm">Type:</label>
@@ -1611,7 +1613,7 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
               </div>
             )}
             {/* Employee filters */}
-            {user?.role === 'employee' && (
+            {effectiveRole === 'employee' && (
               <div className="flex items-center gap-3 flex-nowrap">
                 <div className="flex items-center gap-2">
                   <label className="text-sm">Type:</label>
@@ -1689,7 +1691,7 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
                 </tr>
               </thead>
               <tbody>
-                {(user?.role !== 'employee' && allAttendanceLoading) ? (
+                {(effectiveRole !== 'employee' && allAttendanceLoading) ? (
                   <tr>
                     <td className="py-6 px-4 text-center text-sm text-gray-500 dark:text-gray-400" colSpan={isEmployee ? 7 : 6}>
                       Loading attendance...
@@ -1741,7 +1743,7 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
         </CardContent>
       </Card>
 
-      {user?.role === 'employee' && (
+      {effectiveRole === 'employee' && (
         <>
           {/* Monthly Calendar View */}
           <Card>
@@ -2271,7 +2273,7 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
                         // Filter by department (case-insensitive). Accept various structures
                         const deptRaw = emp?.department || emp?.Employee?.department || emp?.Department?.name;
                         const dept = String(deptRaw || '').toLowerCase();
-                        const inEngineering = dept === 'engineering';
+                        const inEngineering = dept === 'engineering' || dept === 'human resources' || dept==='finance';
                         return isActive && inEngineering;
                       })
                       .map(employee => (
