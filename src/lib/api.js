@@ -192,7 +192,7 @@ export const RecruitmentAPI = {
     },
     create: (data) => api.post('/api/recruitment/jobs', data),
     get: (id) => api.get(`/api/recruitment/jobs/${id}`),
-    update: (id, data) => api.patch(`/api/recruitment/jobs/${id}`, data),
+    update: (id, data) => api.put(`/api/recruitment/jobs/${id}`, data),
     delete: (id) => api.delete(`/api/recruitment/jobs/${id}`),
     getStats: () => api.get('/api/recruitment/jobs/stats'),
   },
@@ -202,7 +202,7 @@ export const RecruitmentAPI = {
     list: () => api.get('/api/departments'),
     create: (data) => api.post('/api/departments', data),
     get: (id) => api.get(`/api/departments/${id}`),
-    update: (id, data) => api.patch(`/api/departments/${id}`, data),
+    update: (id, data) => api.put(`/api/departments/${id}`, data),
     delete: (id) => api.delete(`/api/departments/${id}`),
   },
 
@@ -220,8 +220,8 @@ export const RecruitmentAPI = {
     },
     create: (data) => api.post('/api/recruitment/candidates', data),
     get: (id) => api.get(`/api/recruitment/candidates/${id}`),
-    update: (id, data) => api.patch(`/api/recruitment/candidates/${id}`, data),
-    updateStatus: (id, status) => api.patch(`/api/recruitment/candidates/${id}/status`, { status }),
+    update: (id, data) => api.put(`/api/recruitment/candidates/${id}`, data),
+    updateStatus: (id, status) => api.put(`/api/recruitment/candidates/${id}/status`, { status }),
     delete: (id) => api.delete(`/api/recruitment/candidates/${id}`),
     getJobStats: (jobId) => api.get(`/api/recruitment/candidates/job/${jobId}/stats`)
   },
