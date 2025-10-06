@@ -65,8 +65,8 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
     {
       title: 'Expenses',
       icon: Receipt,
-      path: '/expenses',
-      permission: 'expenses'
+      path: user?.role === 'employee' ? '/employee/expenses' : '/expenses',
+      permission: null // Allow all users to see expenses
     },
     {
       title: 'Documents',
@@ -86,7 +86,7 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
     !item.permission || hasPermission(item.permission) || hasPermission('all')
   );
 
-  // Employee Portal Items (same components, employee view mode)
+  // Employee Portal Items (for HR and Finance users to access employee view)
   const employeePortalItems = [
     {
       title: 'Dashboard',
@@ -107,6 +107,12 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
       description: 'My leave requests'
     },
     {
+      title: 'Expenses',
+      icon: Receipt,
+      path: '/employee/expenses',
+      description: 'My expense reimbursements'
+    },
+    {
       title: 'Documents',
       icon: FileText,
       path: '/employee/documents',
@@ -116,7 +122,9 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
 
   // Check if user is HR or Finance (should have both management and employee access)
   // Admin users only get management access, not employee portal
+  // Regular employees get direct access, no portal needed
   const canAccessEmployeePortal = user?.role === 'hr' || user?.role === 'finance';
+
 
   return (
     <>

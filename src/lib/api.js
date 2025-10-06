@@ -271,3 +271,15 @@ export const RecruitmentAPI = {
     }
   }
 };
+
+// Expense Management APIs
+export const ExpenseAPI = {
+  categories: {
+    list: () => api.get('/api/expense/categories'),
+    create: (data) => api.post('/api/expense/categories', data),
+    get: (id) => api.get(`/api/expense/categories/${id}`),
+    update: (id, data) => api.put(`/api/expense/categories/${id}`, data),
+    delete: (id) => api.delete(`/api/expense/categories/${id}`),
+    getActive: () => api.get('/api/expense/categories/active'),
+  }
+};

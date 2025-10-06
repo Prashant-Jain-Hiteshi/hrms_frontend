@@ -46,6 +46,7 @@ import PayrollManagement from './components/Payroll/PayrollManagement';
 import RecruitmentManagement from './components/Recruitment/RecruitmentManagement';
 import PerformanceManagement from './components/Performance/PerformanceManagement';
 import ExpenseManagement from './components/Expenses/ExpenseManagement';
+import EmployeeExpenseManagement from './components/Expenses/EmployeeExpenseManagement';
 import DocumentManagement from './components/Documents/DocumentManagement';
 import ReportsManagement from './components/Reports/ReportsManagement';
 import SettingsManagement from './components/Settings/SettingsManagement';
@@ -86,6 +87,7 @@ function App() {
                 <Route path="employee/dashboard" element={<EmployeeDashboardRouter />} />
                 <Route path="employee/attendance" element={<AttendanceManagement />} />
                 <Route path="employee/leave" element={<LeaveManagement />} />
+                <Route path="employee/expenses" element={<EmployeeExpenseManagement />} />
                 <Route path="employee/documents" element={<DocumentManagement />} />
                 
                 <Route path="test" element={<div className="p-6"><h1 className="text-2xl font-bold">Test Page</h1><p>This is a test page to verify routing works.</p></div>} />

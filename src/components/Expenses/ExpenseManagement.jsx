@@ -22,10 +22,12 @@ import {
   Receipt,
   Building,
   User,
-  FileText
+  FileText,
+  Settings
 } from 'lucide-react';
 import { Input } from '../ui/Input';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell } from 'recharts';
+import ExpenseConfig from './ExpenseConfig';
 
 const ExpenseManagement = () => {
   const { user } = useAuth();
@@ -286,7 +288,8 @@ const ExpenseManagement = () => {
           {[
             { id: 'expenses', label: 'Expenses', icon: Receipt },
             { id: 'categories', label: 'Categories', icon: Building },
-            { id: 'analytics', label: 'Analytics', icon: TrendingUp }
+            { id: 'analytics', label: 'Analytics', icon: TrendingUp },
+            { id: 'config', label: 'Config', icon: Settings }
           ].map(tab => (
             <button
               key={tab.id}
@@ -600,6 +603,10 @@ const ExpenseManagement = () => {
         </div>
       )}
 
+      {/* Config Tab */}
+      {selectedTab === 'config' && (
+        <ExpenseConfig />
+      )}
 
       {/* Add Expense Form Modal */}
       {showExpenseForm && (
