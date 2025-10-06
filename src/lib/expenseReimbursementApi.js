@@ -4,7 +4,7 @@ export const expenseReimbursementAPI = {
   // Employee APIs
   async getMyRequests() {
     try {
-      const response = await api.get('/api/expense/reimbursements/my-requests');
+      const response = await api.get('/expense/reimbursements/my-requests');
       return response.data;
     } catch (error) {
       console.error('Error fetching my reimbursement requests:', error);
@@ -14,7 +14,7 @@ export const expenseReimbursementAPI = {
 
   async submitRequest(formData) {
     try {
-      const response = await api.post('/api/expense/reimbursements', formData, {
+      const response = await api.post('/expense/reimbursements', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
@@ -26,22 +26,10 @@ export const expenseReimbursementAPI = {
     }
   },
 
-  async calculateAmount(categoryId, amount) {
-    try {
-      const response = await api.post('/api/expense/reimbursements/calculate', {
-        categoryId,
-        amount
-      });
-      return response.data;
-    } catch (error) {
-      console.error('Error calculating approved amount:', error);
-      throw error;
-    }
-  },
 
   async getRequestById(id) {
     try {
-      const response = await api.get(`/api/expense/reimbursements/${id}`);
+      const response = await api.get(`/expense/reimbursements/${id}`);
       return response.data;
     } catch (error) {
       console.error('Error fetching reimbursement request:', error);

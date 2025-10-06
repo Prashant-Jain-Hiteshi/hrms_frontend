@@ -57,34 +57,22 @@ const ApplyReimbursementModal = ({ isOpen, onClose, categories, onSubmit }) => {
     }
   }, [formData.categoryId, formData.amount]);
 
-  const calculatePreview = async () => {
+  const calculatePreview = () => {
     const amount = parseFloat(formData.amount);
     
     if (formData.categoryId && amount > 0) {
-      try {
-        const response = await expenseReimbursementAPI.calculateAmount(formData.categoryId, amount);
-        const calculation = response?.data || response;
-        
+      const category = categories.find(c => c.id === formData.categoryId);
+      if (category) {
+        const approvedAmount = (amount * category.autoApprovalPercent) / 100;
         setPreviewCalculation({
-          requestedAmount: calculation.requestedAmount,
-          approvedAmount: calculation.approvedAmount,
-          approvalPercentage: calculation.approvalPercentage,
-          categoryName: categories.find(c => c.id === formData.categoryId)?.categoryName || 'Selected Category'
+          requestedAmount: amount,
+          approvedAmount: approvedAmount,
+          approvalPercentage: category.autoApprovalPercent,
+          categoryName: category.categoryName
         });
-      } catch (error) {
-        console.error('Error calculating preview:', error);
-        // Fallback to local calculation
-        const category = categories.find(c => c.id === formData.categoryId);
-        if (category) {
-          const approvedAmount = (amount * category.autoApprovalPercent) / 100;
-          setPreviewCalculation({
-            requestedAmount: amount,
-            approvedAmount: approvedAmount,
-            approvalPercentage: category.autoApprovalPercent,
-            categoryName: category.categoryName
-          });
-        }
       }
+    } else {
+      setPreviewCalculation(null);
     }
   };
 
