@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/Card';
 import { 
@@ -8,6 +8,7 @@ import {
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
 import { getDashboardStats, MOCK_LEAVE_REQUESTS, MOCK_JOB_OPENINGS } from '../../data/mockData';
 import { useData } from '../../contexts/DataContext';
+import { RecruitmentAPI } from '../../lib/api';
 
 const HRDashboard = () => {
   const navigate = useNavigate();
@@ -17,26 +18,40 @@ const HRDashboard = () => {
     ? employees.filter(e => (e.status || 'active') === 'active').length
     : 0;
 
+  // State for recruitment data
+  const [recruitmentStats, setRecruitmentStats] = useState({
+    upcomingInterviews: 0,
+    newApplications: 0,
+    todaysInterviews: [],
+    recruitmentTrends: []
+  });
+  const [loading, setLoading] = useState(true);
 
-  const recruitmentData = [
-    { name: 'Jan', applications: 45, hired: 8 },
-    { name: 'Feb', applications: 52, hired: 12 },
-    { name: 'Mar', applications: 38, hired: 6 },
-    { name: 'Apr', applications: 61, hired: 15 },
-    { name: 'May', applications: 49, hired: 9 },
-    { name: 'Jun', applications: 67, hired: 18 },
-  ];
+  // Load recruitment data
+  const loadRecruitmentData = async () => {
+    try {
+      setLoading(true);
+      console.log('🔄 Loading HR dashboard data...');
+      const data = await RecruitmentAPI.dashboard.getHRDashboardStats();
+      console.log('✅ HR dashboard data loaded:', data);
+      console.log('📊 Today\'s interviews:', data.todaysInterviews);
+      setRecruitmentStats(data);
+    } catch (error) {
+      console.error('❌ Failed to load recruitment data:', error);
+      console.error('🔍 Error details:', error.response?.data);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadRecruitmentData();
+  }, []);
 
   const leaveStatusData = [
     { name: 'Approved', value: 85, color: '#10b981' },
     { name: 'Pending', value: 12, color: '#f59e0b' },
     { name: 'Rejected', value: 3, color: '#ef4444' },
-  ];
-
-  const upcomingInterviews = [
-    { candidate: 'John Smith', position: 'Senior Developer', time: '10:00 AM', date: 'Today' },
-    { candidate: 'Sarah Johnson', position: 'HR Executive', time: '2:00 PM', date: 'Today' },
-    { candidate: 'Mike Wilson', position: 'UI Designer', time: '11:00 AM', date: 'Tomorrow' },
   ];
 
   const topPerformers = [
@@ -72,7 +87,7 @@ const HRDashboard = () => {
             <UserPlus className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{stats.upcomingInterviews}</div>
+            <div className="text-2xl font-bold">{loading ? '...' : recruitmentStats.upcomingInterviews}</div>
             <p className="text-xs text-muted-foreground">This week</p>
           </CardContent>
         </Card>
@@ -94,7 +109,7 @@ const HRDashboard = () => {
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{stats.newApplications}</div>
+            <div className="text-2xl font-bold">{loading ? '...' : recruitmentStats.newApplications}</div>
             <p className="text-xs text-muted-foreground">This month</p>
           </CardContent>
         </Card>
@@ -110,11 +125,17 @@ const HRDashboard = () => {
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={recruitmentData}>
+              <BarChart data={recruitmentStats.recruitmentTrends || []}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" />
+                <XAxis dataKey="month" />
                 <YAxis />
-                <Tooltip />
+                <Tooltip 
+                  formatter={(value, name) => [
+                    `${value} ${name.toLowerCase()}`, 
+                    name === 'Applications' ? 'Applications Received' : 'Candidates Hired'
+                  ]}
+                  labelFormatter={(label) => `${label} 2024`}
+                />
                 <Bar dataKey="applications" fill="#3b82f6" name="Applications" />
                 <Bar dataKey="hired" fill="#10b981" name="Hired" />
               </BarChart>
@@ -165,21 +186,23 @@ const HRDashboard = () => {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {upcomingInterviews.map((interview, index) => (
-                <div key={index} className="flex items-center space-x-3 p-3 rounded-lg bg-gray-50 dark:bg-gray-800">
-                  <div className="bg-primary/10 rounded-full p-2">
-                    <Clock className="h-4 w-4 text-primary" />
+              {loading ? (
+                <div className="text-center text-muted-foreground">Loading...</div>
+              ) : recruitmentStats.todaysInterviews.length === 0 ? (
+                <div className="text-center text-muted-foreground">No interviews today</div>
+              ) : (
+                recruitmentStats.todaysInterviews.map((interview, index) => (
+                  <div key={index} className="flex items-center space-x-3 p-3 rounded-lg bg-gray-50 dark:bg-gray-800">
+                    <div className="bg-primary/10 rounded-full p-2">
+                      <Clock className="h-4 w-4 text-primary" />
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm font-medium">{interview.candidate}</p>
+                      <p className="text-xs text-muted-foreground">{interview.position}</p>
+                    </div>
                   </div>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium">{interview.candidate}</p>
-                    <p className="text-xs text-muted-foreground">{interview.position}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-xs font-medium">{interview.time}</p>
-                    <p className="text-xs text-muted-foreground">{interview.date}</p>
-                  </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </CardContent>
         </Card>

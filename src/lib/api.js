@@ -165,3 +165,109 @@ export const CalendarAPI = {
     monthly: (params = {}) => api.get('/leave/calendar/working-days', { params }),
   },
 };
+
+// Recruitment & Onboarding endpoints
+export const RecruitmentAPI = {
+  // Department APIs
+  departments: {
+    list: () => api.get('/api/departments'),
+    create: (data) => api.post('/api/departments', data),
+    get: (id) => api.get(`/api/departments/${id}`),
+    update: (id, data) => api.put(`/api/departments/${id}`, data),
+    delete: (id) => api.delete(`/api/departments/${id}`),
+  },
+  
+  // Job APIs
+  jobs: {
+    list: (params = {}) => {
+      const queryParams = {};
+      if (params.page) queryParams.page = params.page;
+      if (params.limit) queryParams.limit = params.limit;
+      if (params.search) queryParams.search = params.search;
+      if (params.department) queryParams.department = params.department;
+      if (params.status) queryParams.status = params.status;
+      if (params.jobType) queryParams.jobType = params.jobType;
+      
+      return api.get('/api/recruitment/jobs', { params: queryParams });
+    },
+    create: (data) => api.post('/api/recruitment/jobs', data),
+    get: (id) => api.get(`/api/recruitment/jobs/${id}`),
+    update: (id, data) => api.patch(`/api/recruitment/jobs/${id}`, data),
+    delete: (id) => api.delete(`/api/recruitment/jobs/${id}`),
+    getStats: () => api.get('/api/recruitment/jobs/stats'),
+  },
+  
+  // Department APIs
+  departments: {
+    list: () => api.get('/api/departments'),
+    create: (data) => api.post('/api/departments', data),
+    get: (id) => api.get(`/api/departments/${id}`),
+    update: (id, data) => api.patch(`/api/departments/${id}`, data),
+    delete: (id) => api.delete(`/api/departments/${id}`),
+  },
+
+  // Candidate APIs
+  candidates: {
+    list: (params = {}) => {
+      const queryParams = {};
+      if (params.page) queryParams.page = params.page;
+      if (params.limit) queryParams.limit = params.limit;
+      if (params.search) queryParams.search = params.search;
+      if (params.status) queryParams.status = params.status;
+      if (params.jobId) queryParams.jobId = params.jobId;
+      
+      return api.get('/api/recruitment/candidates', { params: queryParams });
+    },
+    create: (data) => api.post('/api/recruitment/candidates', data),
+    get: (id) => api.get(`/api/recruitment/candidates/${id}`),
+    update: (id, data) => api.patch(`/api/recruitment/candidates/${id}`, data),
+    updateStatus: (id, status) => api.patch(`/api/recruitment/candidates/${id}/status`, { status }),
+    delete: (id) => api.delete(`/api/recruitment/candidates/${id}`),
+    getJobStats: (jobId) => api.get(`/api/recruitment/candidates/job/${jobId}/stats`)
+  },
+  
+  // Dashboard APIs
+  dashboard: {
+    getOverviewStats: async () => {
+      try {
+        const [jobStats, dashboardStats, recruitmentFunnel, monthlyTrends] = await Promise.all([
+          api.get('/api/recruitment/jobs/stats'),
+          api.get('/api/recruitment/dashboard/stats'),
+          api.get('/api/recruitment/dashboard/funnel'),
+          api.get('/api/recruitment/dashboard/trends?months=6')
+        ]);
+        
+        return {
+          jobStats: jobStats.data.data,
+          totalApplications: dashboardStats.data.totalApplications,
+          interviewsScheduled: dashboardStats.data.interviewsScheduled,
+          hiredThisMonth: dashboardStats.data.hiredThisMonth,
+          recruitmentFunnel: recruitmentFunnel.data,
+          monthlyHiring: monthlyTrends.data
+        };
+      } catch (error) {
+        console.error('Dashboard API Error:', error);
+        throw error;
+      }
+    },
+
+    getHRDashboardStats: async () => {
+      try {
+        const [hrStats, trends] = await Promise.all([
+          api.get('/api/recruitment/dashboard/hr-stats'),
+          api.get('/api/recruitment/dashboard/trends?months=6')
+        ]);
+        
+        return {
+          upcomingInterviews: hrStats.data.upcomingInterviews,
+          newApplications: hrStats.data.newApplications,
+          todaysInterviews: hrStats.data.todaysInterviews,
+          recruitmentTrends: trends.data
+        };
+      } catch (error) {
+        console.error('HR Dashboard API Error:', error);
+        throw error;
+      }
+    }
+  }
+};
