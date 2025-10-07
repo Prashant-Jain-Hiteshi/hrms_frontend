@@ -296,14 +296,14 @@ const ExpenseConfig = () => {
                           >
                             <Edit className="h-3 w-3" />
                           </Button>
-                          <Button
+                          {/* <Button
                             size="sm"
                             variant="destructive"
                             onClick={() => handleDelete(category.id)}
                             disabled={loading}
                           >
                             <Trash2 className="h-3 w-3" />
-                          </Button>
+                          </Button> */}
                         </div>
                       </td>
                     </tr>

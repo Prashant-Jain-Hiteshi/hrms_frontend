@@ -181,18 +181,28 @@ const ApplyReimbursementModal = ({ isOpen, onClose, categories, onSubmit }) => {
     setLoading(true);
 
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Prepare form data for API submission
+      const submissionFormData = new FormData();
       
-      const submissionData = {
-        ...formData,
-        amount: parseFloat(formData.amount),
-        approvedAmount: previewCalculation?.approvedAmount || 0,
-        status: 'pending',
-        submittedAt: new Date().toISOString()
-      };
+      // Add form fields
+      submissionFormData.append('categoryId', formData.categoryId);
+      submissionFormData.append('amount', formData.amount.toString());
+      submissionFormData.append('approvedAmount', (previewCalculation?.approvedAmount || 0).toString());
+      submissionFormData.append('expenseDate', formData.expenseDate);
+      submissionFormData.append('description', formData.description);
+      if (formData.vendor) submissionFormData.append('vendor', formData.vendor);
+      if (formData.businessPurpose) submissionFormData.append('businessPurpose', formData.businessPurpose);
+      
+      // Add receipt files
+      formData.receipts.forEach((file, index) => {
+        submissionFormData.append('receipts', file);
+      });
 
-      onSubmit(submissionData);
+      // Call real API
+      const response = await expenseReimbursementAPI.submitRequest(submissionFormData);
+      
+      toast.success('Expense reimbursement submitted successfully!');
+      onSubmit(response.data);
       onClose();
     } catch (error) {
       toast.error('Failed to submit request. Please try again.');

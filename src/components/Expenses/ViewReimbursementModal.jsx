@@ -16,12 +16,15 @@ import {
 } from 'lucide-react';
 import { Button } from '../ui/Button';
 
-const ViewReimbursementModal = ({ isOpen, onClose, request }) => {
-  if (!isOpen || !request) return null;
+const ViewReimbursementModal = ({ isOpen, onClose, reimbursement }) => {
+  if (!isOpen || !reimbursement) return null;
+  
+  // Use reimbursement instead of request for consistency
+  const request = reimbursement;
 
   const getStatusColor = (status) => {
     switch (status) {
-      case 'pending': return 'text-yellow-600 bg-yellow-50 border-yellow-200';
+      case 'submitted': return 'text-yellow-600 bg-yellow-50 border-yellow-200';
       case 'approved': return 'text-green-600 bg-green-50 border-green-200';
       case 'paid': return 'text-blue-600 bg-blue-50 border-blue-200';
       case 'rejected': return 'text-red-600 bg-red-50 border-red-200';
@@ -31,7 +34,7 @@ const ViewReimbursementModal = ({ isOpen, onClose, request }) => {
 
   const getStatusIcon = (status) => {
     switch (status) {
-      case 'pending': return <Clock className="h-5 w-5" />;
+      case 'submitted': return <Clock className="h-5 w-5" />;
       case 'approved': return <CheckCircle className="h-5 w-5" />;
       case 'paid': return <DollarSign className="h-5 w-5" />;
       case 'rejected': return <XCircle className="h-5 w-5" />;
@@ -111,9 +114,9 @@ const ViewReimbursementModal = ({ isOpen, onClose, request }) => {
             <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
               Reimbursement Request Details
             </h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            {/* <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               Request ID: {request.id}
-            </p>
+            </p> */}
           </div>
           <Button
             variant="ghost"

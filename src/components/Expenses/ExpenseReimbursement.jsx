@@ -62,9 +62,26 @@ const ExpenseReimbursement = () => {
       const pendingRequests = requestsData.filter(r => r.status === 'submitted').length;
       const approvedRequests = requestsData.filter(r => r.status === 'approved').length;
       const paidRequests = requestsData.filter(r => r.status === 'paid').length;
-      const thisMonthAmount = requestsData
-        .filter(r => new Date(r.expenseDate).getMonth() === new Date().getMonth())
-        .reduce((sum, r) => sum + (r.approvedAmount || 0), 0);
+      const thisMonthPaidRequests = requestsData.filter(r => {
+        const expenseDate = new Date(r.expenseDate);
+        const currentDate = new Date();
+        const isThisMonth = expenseDate.getMonth() === currentDate.getMonth() && 
+                           expenseDate.getFullYear() === currentDate.getFullYear();
+        const isPaid = r.status === 'paid';
+        return isThisMonth && isPaid;
+      });
+
+      console.log('🔍 DEBUG - This month PAID requests:', thisMonthPaidRequests);
+
+      const thisMonthAmount = thisMonthPaidRequests.reduce((sum, r) => {
+        // Use approvedAmount for paid requests (this is the actual paid amount)
+        const amount = r.approvedAmount || 0;
+        const parsedAmount = parseFloat(amount);
+        console.log(`🔍 DEBUG - Paid Request ${r.id}: approvedAmount=${amount}, parsedAmount=${parsedAmount}`);
+        return sum + (isNaN(parsedAmount) ? 0 : parsedAmount);
+      }, 0);
+
+      console.log('🔍 DEBUG - Final thisMonthAmount:', thisMonthAmount);
 
       setStats({
         total: totalRequests,
@@ -131,14 +148,16 @@ const ExpenseReimbursement = () => {
   };
 
   const handleViewRequest = (request) => {
+    console.log('🔍 DEBUG - View button clicked for request:', request);
     setSelectedRequest(request);
     setShowViewModal(true);
+    console.log('🔍 DEBUG - Modal should open now, showViewModal:', true);
   };
 
   const handleCancelRequest = async (requestId) => {
-    if (!window.confirm('Are you sure you want to cancel this request?')) {
-      return;
-    }
+    // if (!window.confirm('Are you sure you want to cancel this request?')) {
+    //   return;
+    // }
 
     try {
       await expenseReimbursementAPI.cancelRequest(requestId);
@@ -160,43 +179,18 @@ const ExpenseReimbursement = () => {
     }
   };
 
-  const handleSubmitRequest = async (newRequest) => {
+  const handleSubmitRequest = async (submittedRequest) => {
     try {
-      // Create FormData for file upload
-      const formData = new FormData();
-      
-      // Add form fields
-      formData.append('categoryId', newRequest.categoryId);
-      formData.append('amount', newRequest.amount.toString());
-      formData.append('expenseDate', newRequest.expenseDate);
-      formData.append('description', newRequest.description);
-      
-      if (newRequest.vendor) {
-        formData.append('vendor', newRequest.vendor);
-      }
-      
-      if (newRequest.businessPurpose) {
-        formData.append('businessPurpose', newRequest.businessPurpose);
-      }
-      
-      // Add receipt files
-      if (newRequest.receipts && newRequest.receipts.length > 0) {
-        newRequest.receipts.forEach((file, index) => {
-          formData.append('receipts', file);
-        });
-      }
-      
-      // Submit to API
-      const response = await expenseReimbursementAPI.submitRequest(formData);
-      const submittedRequest = response?.data || response;
+      // Modal has already submitted the request, just reload data
+      console.log('✅ Request submitted successfully:', submittedRequest);
       
       // Reload data to get updated list
       await loadData();
       
-      toast.success('Reimbursement request submitted successfully!');
+      // Success toast is already shown in modal
     } catch (error) {
-      console.error('Error submitting reimbursement request:', error);
-      toast.error(error.response?.data?.message || 'Failed to submit reimbursement request');
+      console.error('Error reloading data after submission:', error);
+      toast.error('Request submitted but failed to refresh list');
     }
   };
 
@@ -274,7 +268,7 @@ const ExpenseReimbursement = () => {
         <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-600 dark:text-gray-400">This Month</p>
+              <p className="text-sm text-gray-600 dark:text-gray-400">This Month (Paid)</p>
               <p className="text-lg font-bold text-gray-900 dark:text-white">
                 {formatCurrency(stats.thisMonth)}
               </p>
@@ -392,7 +386,7 @@ const ExpenseReimbursement = () => {
       <ViewReimbursementModal
         isOpen={showViewModal}
         onClose={() => setShowViewModal(false)}
-        request={selectedRequest}
+        reimbursement={selectedRequest}
       />
     </div>
   );

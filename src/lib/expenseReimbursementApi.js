@@ -4,7 +4,7 @@ export const expenseReimbursementAPI = {
   // Employee APIs
   async getMyRequests() {
     try {
-      const response = await api.get('/expense/reimbursements/my-requests');
+      const response = await api.get('/api/expense/reimbursements/my-requests');
       return response.data;
     } catch (error) {
       console.error('Error fetching my reimbursement requests:', error);
@@ -14,7 +14,7 @@ export const expenseReimbursementAPI = {
 
   async submitRequest(formData) {
     try {
-      const response = await api.post('/expense/reimbursements', formData, {
+      const response = await api.post('/api/expense/reimbursements', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
@@ -26,10 +26,9 @@ export const expenseReimbursementAPI = {
     }
   },
 
-
   async getRequestById(id) {
     try {
-      const response = await api.get(`/expense/reimbursements/${id}`);
+      const response = await api.get(`/api/expense/reimbursements/${id}`);
       return response.data;
     } catch (error) {
       console.error('Error fetching reimbursement request:', error);
@@ -94,6 +93,50 @@ export const expenseReimbursementAPI = {
       return response.data;
     } catch (error) {
       console.error('Error fetching reimbursement statistics:', error);
+      throw error;
+    }
+  },
+
+  // Finance APIs
+  async getApprovedRequests() {
+    try {
+      const response = await api.get('/api/expense/reimbursements/approved');
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching finance reimbursement requests:', error);
+      throw error;
+    }
+  },
+
+  async markAsPaid(id, comments = '') {
+    try {
+      const response = await api.put(`/api/expense/reimbursements/${id}/mark-paid`, {
+        comments
+      });
+      return response.data;
+    } catch (error) {
+      console.error('Error marking reimbursement as paid:', error);
+      throw error;
+    }
+  },
+
+  // Chart Data APIs
+  async getMonthlyTrends(months = 6) {
+    try {
+      const response = await api.get(`/api/expense/reimbursements/monthly-trends?months=${months}`);
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching monthly trends:', error);
+      throw error;
+    }
+  },
+
+  async getCategoryBreakdown() {
+    try {
+      const response = await api.get('/api/expense/reimbursements/category-breakdown');
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching category breakdown:', error);
       throw error;
     }
   },
