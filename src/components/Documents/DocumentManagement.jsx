@@ -25,13 +25,16 @@ import {
   Clock,
   Building,
   Receipt,
-  DollarSign
+  DollarSign,
+  Settings
 } from 'lucide-react';
 import { Input } from '../ui/Input';
 import jsPDF from 'jspdf';
 import { useToast } from '../ui/Toast';
 import { HRPayrollAPI } from '../../lib/hrPayrollApi';
 import { api } from '../../lib/api';
+import { DocumentAPI } from '../../lib/documentApi';
+import DocumentUploadModal from './DocumentUploadModal';
 
 const DocumentManagement = () => {
   const { user } = useAuth();
@@ -50,9 +53,9 @@ const DocumentManagement = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [showDocumentForm, setShowDocumentForm] = useState(false);
   const [documentForm, setDocumentForm] = useState({
-    name: '',
-    type: 'Policy',
-    category: 'HR',
+    documentName: '',
+    typeId: '',
+    categoryId: '',
     description: '',
     file: null
   });
@@ -68,98 +71,248 @@ const DocumentManagement = () => {
   const [bankReceiptData, setBankReceiptData] = useState(null);
   const [bankReceiptLoading, setBankReceiptLoading] = useState(false);
 
-  // Get filtered documents based on user role
-  const userDocuments = getFilteredData('documents', user?.role, user?.id) || documents;
+  // Config tab states
+  const [categories, setCategories] = useState([]);
+  const [types, setTypes] = useState([]);
+  const [configLoading, setConfigLoading] = useState(false);
+  const [showCategoryModal, setShowCategoryModal] = useState(false);
+  const [showTypeModal, setShowTypeModal] = useState(false);
+  const [editingCategory, setEditingCategory] = useState(null);
+  const [editingType, setEditingType] = useState(null);
+  const [categoryForm, setCategoryForm] = useState({
+    categoryName: '',
+    description: '',
+    icon: 'folder',
+    isActive: true
+  });
+  const [typeForm, setTypeForm] = useState({
+    typeName: '',
+    description: '',
+    icon: 'file-text',
+    isActive: true
+  });
+  const [formErrors, setFormErrors] = useState({});
+
+  // Upload form states
+  const [activeCategories, setActiveCategories] = useState([]);
+  const [activeTypes, setActiveTypes] = useState([]);
+  const [dropdownLoading, setDropdownLoading] = useState(false);
+  const [showUploadModal, setShowUploadModal] = useState(false);
+
+  // Real document data states
+  const [realDocuments, setRealDocuments] = useState([]);
+  const [documentsLoading, setDocumentsLoading] = useState(false);
+  const [documentsError, setDocumentsError] = useState(null);
+  
+  // Filter states
+  const [selectedCategory, setSelectedCategory] = useState('');
+  const [selectedType, setSelectedType] = useState('');
+  
+  // Statistics states
+  const [statistics, setStatistics] = useState({
+    total: 0,
+    active: 0,
+    inactive: 0,
+    byCategory: 0,
+    byType: 0
+  });
+  const [statisticsLoading, setStatisticsLoading] = useState(false);
+
+  // Get filtered documents based on user role - use real documents from backend
+  const userDocuments = realDocuments.filter(doc => {
+    // Search filter
+    const matchesSearch = !searchTerm || 
+      doc.documentName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      doc.description?.toLowerCase().includes(searchTerm.toLowerCase());
+    
+    // Category filter
+    const matchesCategory = !selectedCategory || doc.categoryId === selectedCategory;
+    
+    // Type filter
+    const matchesType = !selectedType || doc.typeId === selectedType;
+    
+    return matchesSearch && matchesCategory && matchesType;
+  });
 
   const handleDocumentFormChange = (field, value) => {
     setDocumentForm(prev => ({ ...prev, [field]: value }));
   };
 
-  const handleDocumentSubmit = () => {
-    if (!documentForm.name || !documentForm.description) {
-      console.warn('Please fill in all required fields');
+  const handleDocumentSubmit = async () => {
+    if (!documentForm.documentName || !documentForm.description || !documentForm.typeId || !documentForm.categoryId || !documentForm.file) {
+      toast.error('Please fill in all required fields and select a file');
       return;
     }
 
-    const newDocument = {
-      ...documentForm,
-      size: documentForm.file ? `${(documentForm.file.size / 1024 / 1024).toFixed(1)} MB` : '0 MB',
-      uploadedBy: user?.name || 'Current User',
-      access: 'public'
-    };
+    try {
+      console.log(' Submitting document:', documentForm);
+      
+      // Create FormData for file upload
+      const formData = new FormData();
+      formData.append('documentName', documentForm.documentName);
+      formData.append('description', documentForm.description);
+      formData.append('typeId', documentForm.typeId);
+      formData.append('categoryId', documentForm.categoryId);
+      formData.append('files', documentForm.file);
 
-    addDocument(newDocument);
-    setDocumentForm({
-      name: '',
-      type: 'Policy',
-      category: 'HR',
-      description: '',
-      file: null
-    });
-    setShowDocumentForm(false);
+      // Call backend API
+      const response = await DocumentAPI.documents.create(formData);
+      
+      toast.success('Document uploaded successfully!');
+      setShowDocumentForm(false);
+      
+      // Reset form
+      setDocumentForm({
+        documentName: '',
+        typeId: '',
+        categoryId: '',
+        description: '',
+        file: null
+      });
+      
+      console.log(' Document uploaded:', response.data);
+    } catch (error) {
+      console.error(' Error uploading document:', error);
+      toast.error(error.response?.data?.message || 'Failed to upload document');
+    }
   };
 
   const handleEditDocument = (document) => {
     setSelectedDocument(document);
     setDocumentForm({
-      name: document.name,
-      type: document.type,
-      category: document.category,
+      documentName: document.documentName,
+      typeId: document.typeId,
+      categoryId: document.categoryId,
       description: document.description,
       file: null
     });
+    
+    // Load active categories and types for dropdowns
+    fetchActiveDropdownData();
     setShowEditModal(true);
   };
 
-  const handleUpdateDocument = () => {
-    if (!documentForm.name || !documentForm.description) {
-      console.warn('Please fill in all required fields');
+  const handleUpdateDocument = async () => {
+    if (!documentForm.documentName || !documentForm.description || !documentForm.typeId || !documentForm.categoryId) {
+      toast.error('Please fill in all required fields');
       return;
     }
 
-    updateDocument(selectedDocument.id, {
-      name: documentForm.name,
-      type: documentForm.type,
-      category: documentForm.category,
-      description: documentForm.description
-    });
-    
-    setShowEditModal(false);
-    setSelectedDocument(null);
-    setDocumentForm({
-      name: '',
-      type: 'Policy',
-      category: 'HR',
-      description: '',
-      file: null
-    });
+    try {
+      console.log('🔍 Updating document:', selectedDocument.id, documentForm);
+      
+      const updateData = {
+        documentName: documentForm.documentName,
+        description: documentForm.description,
+        typeId: documentForm.typeId,
+        categoryId: documentForm.categoryId
+      };
+
+      await DocumentAPI.documents.update(selectedDocument.id, updateData);
+      
+      toast.success('Document updated successfully!');
+      setShowEditModal(false);
+      setSelectedDocument(null);
+      
+      // Reset form
+      setDocumentForm({
+        documentName: '',
+        typeId: '',
+        categoryId: '',
+        description: '',
+        file: null
+      });
+      
+      // Refresh document list to show updated data
+      fetchRealDocuments();
+      
+    } catch (error) {
+      console.error('❌ Error updating document:', error);
+      toast.error(error.response?.data?.message || 'Failed to update document');
+    }
   };
 
-  const handleDeleteDocument = (documentId) => {
-    console.log('Delete document requested for ID:', documentId);
-    deleteDocument(documentId);
+  const handleDeleteDocument = async (documentId) => {
+    // Find the document to get its name for confirmation
+    const document = realDocuments.find(doc => doc.id === documentId);
+    if (!document) {
+      toast.error('Document not found');
+      return;
+    }
+
+    // Show confirmation dialog
+    const confirmDelete = window.confirm(
+      `Are you sure you want to delete "${document.documentName}"?\n\nThis action cannot be undone.`
+    );
+    
+    if (!confirmDelete) {
+      return;
+    }
+
+    try {
+      console.log('🗑️ Deleting document via API:', documentId, document.documentName);
+      
+      // Call the backend delete API
+      await DocumentAPI.documents.delete(documentId);
+      
+      toast.success(`Document "${document.documentName}" deleted successfully!`);
+      console.log('✅ Document deleted from backend:', document.documentName);
+      
+      // Refresh document list to remove deleted document from UI
+      fetchRealDocuments();
+      
+    } catch (error) {
+      console.error('❌ Error deleting document:', error);
+      toast.error(error.response?.data?.message || 'Failed to delete document');
+    }
   };
 
   const handleDownloadDocument = (documentId) => {
-    // Simulate download - increment download count
-    const document = userDocuments.find(doc => doc.id === documentId);
-    if (document) {
-      updateDocument(documentId, { downloads: (document.downloads || 0) + 1 });
+    // Find the document to get its public URL
+    const document = realDocuments.find(doc => doc.id === documentId);
+    if (!document) {
+      toast.error('Document not found');
+      return;
+    }
+
+    try {
+      console.log('📥 Downloading document via public URL:', document.documentName);
       
-      // Create a downloadable file (simulate document content)
-      const content = `Document: ${document.name}\nType: ${document.type}\nSize: ${document.size}\nUploaded: ${document.uploadDate}\nDescription: ${document.description || 'No description available'}\n\nThis is a simulated document download.`;
-      const blob = new Blob([content], { type: 'text/plain' });
-      const url = URL.createObjectURL(blob);
+      // Check if document has a public URL
+      if (!document.fileUrl) {
+        toast.error('Document download URL not available');
+        console.error('❌ No fileUrl found for document:', document);
+        return;
+      }
+
+      // Create a temporary link element to trigger download
       const link = document.createElement('a');
-      link.href = url;
-      link.download = `${document.name}.txt`;
+      link.href = document.fileUrl;
+      
+      // Use original filename or fallback to document name
+      const filename = document.fileName || `${document.documentName.replace(/[^a-z0-9]/gi, '_')}.${document.fileName?.split('.').pop() || 'file'}`;
+      link.download = filename;
+      
+      // Set target to _blank to handle cross-origin downloads
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      
+      // Trigger download
       link.style.visibility = 'hidden';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      URL.revokeObjectURL(url);
       
-      console.log(`Document "${document.name}" downloaded successfully!`);
+      toast.success(`Document "${document.documentName}" downloaded successfully!`);
+      console.log('✅ Document downloaded via public URL:', {
+        filename,
+        url: document.fileUrl,
+        documentName: document.documentName
+      });
+      
+    } catch (error) {
+      console.error('❌ Error downloading document:', error);
+      toast.error('Failed to download document');
     }
   };
 
@@ -434,6 +587,296 @@ const DocumentManagement = () => {
     return months;
   };
 
+  // Config Tab Functions
+  const fetchCategories = async () => {
+    try {
+      setConfigLoading(true);
+      const response = await DocumentAPI.categories.getAll();
+      setCategories(response.data.data || []);
+    } catch (error) {
+      console.error('Error fetching categories:', error);
+      toast.error('Failed to load categories');
+    } finally {
+      setConfigLoading(false);
+    }
+  };
+
+  const fetchTypes = async () => {
+    try {
+      setConfigLoading(true);
+      const response = await DocumentAPI.types.getAll();
+      setTypes(response.data.data || []);
+    } catch (error) {
+      console.error('Error fetching types:', error);
+      toast.error('Failed to load types');
+    } finally {
+      setConfigLoading(false);
+    }
+  };
+
+  // Load config data when config tab is selected
+  useEffect(() => {
+    if (selectedTab === 'config') {
+      fetchCategories();
+      fetchTypes();
+    }
+  }, [selectedTab]);
+
+  // Form validation
+  const validateCategoryForm = () => {
+    const errors = {};
+    if (!categoryForm.categoryName || categoryForm.categoryName.length < 2) {
+      errors.categoryName = 'Category name must be at least 2 characters';
+    }
+    if (categoryForm.categoryName && categoryForm.categoryName.length > 100) {
+      errors.categoryName = 'Category name must be less than 100 characters';
+    }
+    if (categoryForm.description && categoryForm.description.length > 500) {
+      errors.description = 'Description must be less than 500 characters';
+    }
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const validateTypeForm = () => {
+    const errors = {};
+    if (!typeForm.typeName || typeForm.typeName.length < 2) {
+      errors.typeName = 'Type name must be at least 2 characters';
+    }
+    if (typeForm.typeName && typeForm.typeName.length > 100) {
+      errors.typeName = 'Type name must be less than 100 characters';
+    }
+    if (typeForm.description && typeForm.description.length > 500) {
+      errors.description = 'Description must be less than 500 characters';
+    }
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  // Category handlers
+  const handleCategorySubmit = async () => {
+    if (!validateCategoryForm()) return;
+
+    try {
+      if (editingCategory) {
+        await DocumentAPI.categories.update(editingCategory.id, categoryForm);
+        toast.success('Category updated successfully');
+      } else {
+        await DocumentAPI.categories.create(categoryForm);
+        toast.success('Category created successfully');
+      }
+      setShowCategoryModal(false);
+      resetCategoryForm();
+      fetchCategories();
+    } catch (error) {
+      console.error('Error saving category:', error);
+      toast.error(error.response?.data?.message || 'Failed to save category');
+    }
+  };
+
+  const handleEditCategory = (category) => {
+    setEditingCategory(category);
+    setCategoryForm({
+      categoryName: category.categoryName,
+      description: category.description || '',
+      icon: category.icon || 'folder',
+      isActive: category.isActive
+    });
+    setShowCategoryModal(true);
+  };
+
+  const handleDeleteCategory = async (categoryId) => {
+    try {
+      await DocumentAPI.categories.delete(categoryId);
+      toast.success('Category deleted successfully');
+      fetchCategories();
+    } catch (error) {
+      console.error('Error deleting category:', error);
+      toast.error('Failed to delete category');
+    }
+  };
+
+  const resetCategoryForm = () => {
+    setCategoryForm({
+      categoryName: '',
+      description: '',
+      icon: 'folder',
+      isActive: true
+    });
+    setEditingCategory(null);
+    setFormErrors({});
+  };
+
+  // Type handlers
+  const handleTypeSubmit = async () => {
+    if (!validateTypeForm()) return;
+
+    try {
+      if (editingType) {
+        await DocumentAPI.types.update(editingType.id, typeForm);
+        toast.success('Type updated successfully');
+      } else {
+        await DocumentAPI.types.create(typeForm);
+        toast.success('Type created successfully');
+      }
+      setShowTypeModal(false);
+      resetTypeForm();
+      fetchTypes();
+    } catch (error) {
+      console.error('Error saving type:', error);
+      toast.error(error.response?.data?.message || 'Failed to save type');
+    }
+  };
+
+  const handleEditType = (type) => {
+    setEditingType(type);
+    setTypeForm({
+      typeName: type.typeName,
+      description: type.description || '',
+      icon: type.icon || 'file-text',
+      isActive: type.isActive
+    });
+    setShowTypeModal(true);
+  };
+
+  const handleDeleteType = async (typeId) => {
+    try {
+      await DocumentAPI.types.delete(typeId);
+      toast.success('Type deleted successfully');
+      fetchTypes();
+    } catch (error) {
+      console.error('Error deleting type:', error);
+      toast.error('Failed to delete type');
+    }
+  };
+
+  const resetTypeForm = () => {
+    setTypeForm({
+      typeName: '',
+      description: '',
+      icon: 'file-text',
+      isActive: true
+    });
+    setEditingType(null);
+    setFormErrors({});
+  };
+
+  // Icon options
+  const iconOptions = [
+    { value: 'folder', label: 'Folder', icon: Building },
+    { value: 'file-text', label: 'Document', icon: FileText },
+    { value: 'settings', label: 'Settings', icon: Settings },
+    { value: 'user', label: 'User', icon: User },
+    { value: 'calendar', label: 'Calendar', icon: Calendar },
+    { value: 'receipt', label: 'Receipt', icon: Receipt }
+  ];
+
+  // Fetch active categories and types for dropdowns
+  const fetchActiveDropdownData = async () => {
+    try {
+      setDropdownLoading(true);
+      console.log('🔍 Fetching active categories and types for dropdowns...');
+      
+      const [categoriesResponse, typesResponse] = await Promise.all([
+        DocumentAPI.categories.getActive(),
+        DocumentAPI.types.getActive()
+      ]);
+      
+      setActiveCategories(categoriesResponse.data.data || []);
+      setActiveTypes(typesResponse.data.data || []);
+      
+      console.log('✅ Dropdown data loaded:', {
+        categories: categoriesResponse.data.data?.length || 0,
+        types: typesResponse.data.data?.length || 0
+      });
+    } catch (error) {
+      console.error('❌ Error fetching dropdown data:', error);
+      toast.error('Failed to load categories and types');
+    } finally {
+      setDropdownLoading(false);
+    }
+  };
+
+  // Fetch real documents from backend
+  const fetchRealDocuments = async () => {
+    try {
+      setDocumentsLoading(true);
+      setDocumentsError(null);
+      console.log('🔍 Fetching real documents from backend...');
+      
+      const response = await DocumentAPI.documents.getAll();
+      const documentsData = response.data.data || [];
+      
+      console.log('✅ Real documents loaded:', documentsData.length);
+      setRealDocuments(documentsData);
+      
+    } catch (error) {
+      console.error('❌ Error fetching real documents:', error);
+      setDocumentsError('Failed to load documents');
+      toast.error('Failed to load documents from server');
+    } finally {
+      setDocumentsLoading(false);
+    }
+  };
+
+  // Fetch active categories for filter dropdown
+  const fetchActiveCategories = async () => {
+    try {
+      console.log('🔍 Fetching active categories for filters...');
+      const response = await DocumentAPI.categories.getActive();
+      const categoriesData = response.data.data || [];
+      console.log('✅ Active categories loaded:', categoriesData.length);
+      setActiveCategories(categoriesData);
+    } catch (error) {
+      console.error('❌ Error fetching active categories:', error);
+    }
+  };
+
+  // Fetch active types for filter dropdown
+  const fetchActiveTypes = async () => {
+    try {
+      console.log('🔍 Fetching active types for filters...');
+      const response = await DocumentAPI.types.getActive();
+      const typesData = response.data.data || [];
+      console.log('✅ Active types loaded:', typesData.length);
+      setActiveTypes(typesData);
+    } catch (error) {
+      console.error('❌ Error fetching active types:', error);
+    }
+  };
+
+  // Fetch document statistics with role-based filtering
+  const fetchStatistics = async () => {
+    try {
+      setStatisticsLoading(true);
+      console.log('🔍 Fetching document statistics...');
+      const response = await DocumentAPI.documents.getStatistics();
+      const statsData = response.data.data || {};
+      console.log('✅ Document statistics loaded:', statsData);
+      setStatistics(statsData);
+    } catch (error) {
+      console.error('❌ Error fetching document statistics:', error);
+      // Keep default values on error
+    } finally {
+      setStatisticsLoading(false);
+    }
+  };
+
+  // Load documents when component mounts
+  useEffect(() => {
+    fetchRealDocuments();
+    fetchActiveCategories();
+    fetchActiveTypes();
+    fetchStatistics();
+  }, []);
+
+  // Load dropdown data when component mounts or when upload form opens
+  useEffect(() => {
+    if (showDocumentForm) {
+      fetchActiveDropdownData();
+    }
+  }, [showDocumentForm]);
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -446,7 +889,7 @@ const DocumentManagement = () => {
           <Button 
             variant="default" 
             className="flex items-center space-x-2"
-            onClick={() => setShowDocumentForm(true)}
+            onClick={() => setShowUploadModal(true)}
           >
             <Plus className="h-4 w-4" />
             <span>Upload Document</span>
@@ -463,7 +906,9 @@ const DocumentManagement = () => {
                 <FileText className="h-6 w-6 text-blue-600 dark:text-blue-400" />
               </div>
               <div className="ml-4">
-                <div className="text-2xl font-bold text-gray-900 dark:text-white">186</div>
+                <div className="text-2xl font-bold text-gray-900 dark:text-white">
+                  {statisticsLoading ? '...' : statistics.total}
+                </div>
                 <div className="text-sm text-gray-600 dark:text-gray-400">Total Documents</div>
               </div>
             </div>
@@ -477,14 +922,16 @@ const DocumentManagement = () => {
                 <CheckCircle className="h-6 w-6 text-green-600 dark:text-green-400" />
               </div>
               <div className="ml-4">
-                <div className="text-2xl font-bold text-gray-900 dark:text-white">162</div>
+                <div className="text-2xl font-bold text-gray-900 dark:text-white">
+                  {statisticsLoading ? '...' : statistics.active}
+                </div>
                 <div className="text-sm text-gray-600 dark:text-gray-400">Active</div>
               </div>
             </div>
           </CardContent>
         </Card>
 
-        <Card>
+        {/* <Card>
           <CardContent className="pt-6">
             <div className="flex items-center">
               <div className="bg-yellow-100 dark:bg-yellow-900/30 rounded-full p-3">
@@ -496,9 +943,9 @@ const DocumentManagement = () => {
               </div>
             </div>
           </CardContent>
-        </Card>
+        </Card> */}
 
-        <Card>
+        {/* <Card>
           <CardContent className="pt-6">
             <div className="flex items-center">
               <div className="bg-purple-100 dark:bg-purple-900/30 rounded-full p-3">
@@ -510,7 +957,7 @@ const DocumentManagement = () => {
               </div>
             </div>
           </CardContent>
-        </Card>
+        </Card> */}
       </div>
 
       {/* Navigation Tabs */}
@@ -518,9 +965,12 @@ const DocumentManagement = () => {
         <nav className="-mb-px flex space-x-8">
           {[
             { id: 'documents', label: 'Documents', icon: FileText },
-            { id: 'categories', label: 'Categories', icon: Building },
-            { id: 'activity', label: 'Recent Activity', icon: Clock },
-            { id: 'payslips', label: 'Pay Slips', icon: Receipt }
+            // { id: 'categories', label: 'Categories', icon: Building },
+            // { id: 'activity', label: 'Recent Activity', icon: Clock },
+            { id: 'payslips', label: 'Pay Slips', icon: Receipt },
+            ...(user?.role === 'admin' || user?.role === 'hr' ? [
+              { id: 'config', label: 'Config', icon: Settings }
+            ] : [])
           ].map(tab => (
             <button
               key={tab.id}
@@ -556,18 +1006,29 @@ const DocumentManagement = () => {
                     />
                   </div>
                 </div>
-                <select className="px-3 py-2 border border-gray-300 rounded-md dark:border-gray-600 dark:bg-gray-700 dark:text-white">
+                <select 
+                  className="px-3 py-2 border border-gray-300 rounded-md dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                  value={selectedCategory}
+                  onChange={(e) => setSelectedCategory(e.target.value)}
+                >
                   <option value="">All Categories</option>
-                  <option value="hr-policies">HR Policies</option>
-                  <option value="employee-docs">Employee Documents</option>
-                  <option value="performance">Performance</option>
+                  {activeCategories.map((category) => (
+                    <option key={category.id} value={category.id}>
+                      {category.categoryName}
+                    </option>
+                  ))}
                 </select>
-                <select className="px-3 py-2 border border-gray-300 rounded-md dark:border-gray-600 dark:bg-gray-700 dark:text-white">
+                <select 
+                  className="px-3 py-2 border border-gray-300 rounded-md dark:border-gray-600 dark:bg-gray-700 dark:text-white"
+                  value={selectedType}
+                  onChange={(e) => setSelectedType(e.target.value)}
+                >
                   <option value="">All Types</option>
-                  <option value="policy">Policy</option>
-                  <option value="template">Template</option>
-                  <option value="certificate">Certificate</option>
-                  <option value="personal">Personal</option>
+                  {activeTypes.map((type) => (
+                    <option key={type.id} value={type.id}>
+                      {type.typeName}
+                    </option>
+                  ))}
                 </select>
                 <Button variant="outline" className="flex items-center space-x-2">
                   <Filter className="h-4 w-4" />
@@ -602,32 +1063,30 @@ const DocumentManagement = () => {
                               <FileText className="h-4 w-4 text-blue-600 dark:text-blue-400" />
                             </div>
                             <div>
-                              <div className="font-medium text-gray-900 dark:text-white">{document.name}</div>
+                              <div className="font-medium text-gray-900 dark:text-white">{document.documentName}</div>
                               <div className="text-sm text-gray-500 dark:text-gray-400">{document.description}</div>
                               <div className="flex items-center mt-1 space-x-2">
-                                <span className="text-xs text-gray-500 dark:text-gray-400">{document.format || 'PDF'}</span>
-                                <span className="text-xs text-gray-500 dark:text-gray-400">v{document.version}</span>
-                                {document.access === 'private' && <Lock className="h-3 w-3 text-gray-400" />}
-                                {document.access === 'restricted' && <AlertTriangle className="h-3 w-3 text-yellow-500" />}
-                                {document.access === 'public' && <Unlock className="h-3 w-3 text-green-500" />}
+                                <span className="text-xs text-gray-500 dark:text-gray-400">{document.fileName?.split('.').pop()?.toUpperCase() || 'FILE'}</span>
+                                <span className="text-xs text-gray-500 dark:text-gray-400">{(document.fileSize / 1024 / 1024).toFixed(2)} MB</span>
+                                {document.isActive ? <Unlock className="h-3 w-3 text-green-500" /> : <Lock className="h-3 w-3 text-gray-400" />}
                               </div>
                             </div>
                           </div>
                         </td>
-                        <td className="py-4 px-6 text-sm text-gray-600 dark:text-gray-400">{document.type}</td>
-                        <td className="py-4 px-6 text-sm text-gray-600 dark:text-gray-400">{document.category}</td>
-                        <td className="py-4 px-6 text-sm text-gray-600 dark:text-gray-400">{document.size}</td>
+                        <td className="py-4 px-6 text-sm text-gray-600 dark:text-gray-400">{document.type?.typeName || 'Unknown'}</td>
+                        <td className="py-4 px-6 text-sm text-gray-600 dark:text-gray-400">{document.category?.categoryName || 'Unknown'}</td>
+                        <td className="py-4 px-6 text-sm text-gray-600 dark:text-gray-400">{(document.fileSize / 1024 / 1024).toFixed(2)} MB</td>
                         <td className="py-4 px-6">
-                          <div className="text-sm text-gray-600 dark:text-gray-400">{document.lastModified}</div>
-                          <div className="text-xs text-gray-500 dark:text-gray-400">by {document.uploadedBy}</div>
+                          <div className="text-sm text-gray-600 dark:text-gray-400">{new Date(document.updatedAt).toLocaleDateString()}</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400">by {document.uploader?.name || 'Unknown'}</div>
                         </td>
                         <td className="py-4 px-6">
                           <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                            document.status === 'active' 
+                            document.isActive 
                               ? 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400'
                               : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400'
                           }`}>
-                            {document.status.toUpperCase()}
+                            {document.isActive ? 'ACTIVE' : 'INACTIVE'}
                           </span>
                         </td>
                         <td className="py-4 px-6">
@@ -651,30 +1110,35 @@ const DocumentManagement = () => {
                             >
                               <Download className="h-3 w-3" />
                             </Button>
-                            <Button 
-                              size="sm" 
-                              variant="outline"
-                              onClick={() => handleEditDocument(document)}
-                              title="Edit"
-                            >
-                              <Edit className="h-3 w-3" />
-                            </Button>
-                            <Button 
-                              size="sm" 
-                              variant="destructive"
-                              onClick={() => handleDeleteDocument(document.id)}
-                              title="Delete"
-                            >
-                              <Trash2 className="h-3 w-3" />
-                            </Button>
-                            <Button 
+                            {/* Edit and Delete buttons - Only visible to Admin */}
+                            {user?.role === 'admin' && (
+                              <>
+                                <Button 
+                                  size="sm" 
+                                  variant="outline"
+                                  onClick={() => handleEditDocument(document)}
+                                  title="Edit"
+                                >
+                                  <Edit className="h-3 w-3" />
+                                </Button>
+                                <Button 
+                                  size="sm" 
+                                  variant="destructive"
+                                  onClick={() => handleDeleteDocument(document.id)}
+                                  title="Delete"
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </Button>
+                              </>
+                            )}
+                            {/* <Button 
                               size="sm" 
                               variant="outline"
                               onClick={() => handleShareDocument(document.id)}
                               title="Share"
                             >
                               <Share2 className="h-3 w-3" />
-                            </Button>
+                            </Button> */}
                           </div>
                         </td>
                       </tr>
@@ -909,6 +1373,405 @@ const DocumentManagement = () => {
         </div>
       )}
 
+      {/* Config Tab */}
+      {selectedTab === 'config' && (
+        <div className="space-y-8">
+          {/* Document Categories Section */}
+          {/* <div className="space-y-6">
+            <div className="flex justify-between items-center">
+              <div>
+                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Document Categories</h2>
+                <p className="text-gray-600 dark:text-gray-400">Manage document categories for organization</p>
+              </div>
+              <Button 
+                variant="default" 
+                onClick={() => {
+                  resetCategoryForm();
+                  setShowCategoryModal(true);
+                }}
+                className="flex items-center space-x-2"
+              >
+                <Plus className="h-4 w-4" />
+                <span>Add Category</span>
+              </Button>
+            </div>
+
+            <Card>
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+                        <th className="text-left py-4 px-6 font-medium text-gray-900 dark:text-white">Category</th>
+                        <th className="text-left py-4 px-6 font-medium text-gray-900 dark:text-white">Description</th>
+                        <th className="text-left py-4 px-6 font-medium text-gray-900 dark:text-white">Icon</th>
+                        <th className="text-left py-4 px-6 font-medium text-gray-900 dark:text-white">Status</th>
+                        <th className="text-left py-4 px-6 font-medium text-gray-900 dark:text-white">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {configLoading ? (
+                        <tr>
+                          <td colSpan="5" className="py-8 text-center text-gray-500">
+                            Loading categories...
+                          </td>
+                        </tr>
+                      ) : categories.length === 0 ? (
+                        <tr>
+                          <td colSpan="5" className="py-8 text-center text-gray-500">
+                            No categories found. Create your first category.
+                          </td>
+                        </tr>
+                      ) : (
+                        categories.map(category => (
+                          <tr key={category.id} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                            <td className="py-4 px-6">
+                              <div className="font-medium text-gray-900 dark:text-white">{category.categoryName}</div>
+                            </td>
+                            <td className="py-4 px-6 text-sm text-gray-600 dark:text-gray-400">
+                              {category.description || 'No description'}
+                            </td>
+                            <td className="py-4 px-6">
+                              <div className="flex items-center space-x-2">
+                                {iconOptions.find(opt => opt.value === category.icon)?.icon && 
+                                  React.createElement(iconOptions.find(opt => opt.value === category.icon).icon, { className: "h-4 w-4" })
+                                }
+                                <span className="text-sm text-gray-600 dark:text-gray-400">{category.icon}</span>
+                              </div>
+                            </td>
+                            <td className="py-4 px-6">
+                              <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                                category.isActive 
+                                  ? 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400'
+                                  : 'bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-400'
+                              }`}>
+                                {category.isActive ? 'Active' : 'Inactive'}
+                              </span>
+                            </td>
+                            <td className="py-4 px-6">
+                              <div className="flex space-x-2">
+                                <Button 
+                                  size="sm" 
+                                  variant="outline"
+                                  onClick={() => handleEditCategory(category)}
+                                >
+                                  <Edit className="h-3 w-3" />
+                                </Button>
+                                <Button 
+                                  size="sm" 
+                                  variant="destructive"
+                                  onClick={() => handleDeleteCategory(category.id)}
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          </div> */}
+
+          {/* Document Types Section */}
+          <div className="space-y-6">
+            <div className="flex justify-between items-center">
+              <div>
+                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Document Types</h2>
+                <p className="text-gray-600 dark:text-gray-400">Manage document types for classification</p>
+              </div>
+              <Button 
+                variant="default" 
+                onClick={() => {
+                  resetTypeForm();
+                  setShowTypeModal(true);
+                }}
+                className="flex items-center space-x-2"
+              >
+                <Plus className="h-4 w-4" />
+                <span>Add Type</span>
+              </Button>
+            </div>
+
+            <Card>
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+                        <th className="text-left py-4 px-6 font-medium text-gray-900 dark:text-white">Type</th>
+                        <th className="text-left py-4 px-6 font-medium text-gray-900 dark:text-white">Description</th>
+                        <th className="text-left py-4 px-6 font-medium text-gray-900 dark:text-white">Icon</th>
+                        <th className="text-left py-4 px-6 font-medium text-gray-900 dark:text-white">Status</th>
+                        <th className="text-left py-4 px-6 font-medium text-gray-900 dark:text-white">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {configLoading ? (
+                        <tr>
+                          <td colSpan="5" className="py-8 text-center text-gray-500">
+                            Loading types...
+                          </td>
+                        </tr>
+                      ) : types.length === 0 ? (
+                        <tr>
+                          <td colSpan="5" className="py-8 text-center text-gray-500">
+                            No types found. Create your first type.
+                          </td>
+                        </tr>
+                      ) : (
+                        types.map(type => (
+                          <tr key={type.id} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                            <td className="py-4 px-6">
+                              <div className="font-medium text-gray-900 dark:text-white">{type.typeName}</div>
+                            </td>
+                            <td className="py-4 px-6 text-sm text-gray-600 dark:text-gray-400">
+                              {type.description || 'No description'}
+                            </td>
+                            <td className="py-4 px-6">
+                              <div className="flex items-center space-x-2">
+                                {iconOptions.find(opt => opt.value === type.icon)?.icon && 
+                                  React.createElement(iconOptions.find(opt => opt.value === type.icon).icon, { className: "h-4 w-4" })
+                                }
+                                <span className="text-sm text-gray-600 dark:text-gray-400">{type.icon}</span>
+                              </div>
+                            </td>
+                            <td className="py-4 px-6">
+                              <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                                type.isActive 
+                                  ? 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400'
+                                  : 'bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-400'
+                              }`}>
+                                {type.isActive ? 'Active' : 'Inactive'}
+                              </span>
+                            </td>
+                            <td className="py-4 px-6">
+                              <div className="flex space-x-2">
+                                <Button 
+                                  size="sm" 
+                                  variant="outline"
+                                  onClick={() => handleEditType(type)}
+                                >
+                                  <Edit className="h-3 w-3" />
+                                </Button>
+                                <Button 
+                                  size="sm" 
+                                  variant="destructive"
+                                  onClick={() => handleDeleteType(type.id)}
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      )}
+
+      {/* Category Form Modal */}
+      {showCategoryModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md mx-4">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+              {editingCategory ? 'Edit Category' : 'Add Category'}
+            </h3>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Category Name *
+                </label>
+                <Input
+                  value={categoryForm.categoryName}
+                  onChange={(e) => {
+                    setCategoryForm(prev => ({ ...prev, categoryName: e.target.value }));
+                    validateCategoryForm();
+                  }}
+                  placeholder="Enter category name"
+                  className={formErrors.categoryName ? 'border-red-500' : ''}
+                />
+                {formErrors.categoryName && (
+                  <p className="text-red-500 text-xs mt-1">{formErrors.categoryName}</p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Description
+                </label>
+                <textarea
+                  value={categoryForm.description}
+                  onChange={(e) => {
+                    setCategoryForm(prev => ({ ...prev, description: e.target.value }));
+                    validateCategoryForm();
+                  }}
+                  placeholder="Enter description (optional)"
+                  rows="3"
+                  className={`w-full px-3 py-2 border rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white ${
+                    formErrors.description ? 'border-red-500' : 'border-gray-300'
+                  }`}
+                />
+                {formErrors.description && (
+                  <p className="text-red-500 text-xs mt-1">{formErrors.description}</p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Icon
+                </label>
+                <select
+                  value={categoryForm.icon}
+                  onChange={(e) => setCategoryForm(prev => ({ ...prev, icon: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                >
+                  {iconOptions.map(option => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  id="categoryActive"
+                  checked={categoryForm.isActive}
+                  onChange={(e) => setCategoryForm(prev => ({ ...prev, isActive: e.target.checked }))}
+                  className="mr-2"
+                />
+                <label htmlFor="categoryActive" className="text-sm text-gray-700 dark:text-gray-300">
+                  Active
+                </label>
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-3 mt-6">
+              <Button 
+                variant="outline" 
+                onClick={() => {
+                  setShowCategoryModal(false);
+                  resetCategoryForm();
+                }}
+              >
+                Cancel
+              </Button>
+              <Button onClick={handleCategorySubmit}>
+                {editingCategory ? 'Update' : 'Create'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Type Form Modal */}
+      {showTypeModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md mx-4">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+              {editingType ? 'Edit Type' : 'Add Type'}
+            </h3>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Type Name *
+                </label>
+                <Input
+                  value={typeForm.typeName}
+                  onChange={(e) => {
+                    setTypeForm(prev => ({ ...prev, typeName: e.target.value }));
+                    validateTypeForm();
+                  }}
+                  placeholder="Enter type name"
+                  className={formErrors.typeName ? 'border-red-500' : ''}
+                />
+                {formErrors.typeName && (
+                  <p className="text-red-500 text-xs mt-1">{formErrors.typeName}</p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Description
+                </label>
+                <textarea
+                  value={typeForm.description}
+                  onChange={(e) => {
+                    setTypeForm(prev => ({ ...prev, description: e.target.value }));
+                    validateTypeForm();
+                  }}
+                  placeholder="Enter description (optional)"
+                  rows="3"
+                  className={`w-full px-3 py-2 border rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white ${
+                    formErrors.description ? 'border-red-500' : 'border-gray-300'
+                  }`}
+                />
+                {formErrors.description && (
+                  <p className="text-red-500 text-xs mt-1">{formErrors.description}</p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Icon
+                </label>
+                <select
+                  value={typeForm.icon}
+                  onChange={(e) => setTypeForm(prev => ({ ...prev, icon: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                >
+                  {iconOptions.map(option => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  id="typeActive"
+                  checked={typeForm.isActive}
+                  onChange={(e) => setTypeForm(prev => ({ ...prev, isActive: e.target.checked }))}
+                  className="mr-2"
+                />
+                <label htmlFor="typeActive" className="text-sm text-gray-700 dark:text-gray-300">
+                  Active
+                </label>
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-3 mt-6">
+              <Button 
+                variant="outline" 
+                onClick={() => {
+                  setShowTypeModal(false);
+                  resetTypeForm();
+                }}
+              >
+                Cancel
+              </Button>
+              <Button onClick={handleTypeSubmit}>
+                {editingType ? 'Update' : 'Create'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Upload Document Modal */}
       {showDocumentForm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -919,8 +1782,8 @@ const DocumentManagement = () => {
                 <label className="block text-sm font-medium mb-1">Document Name</label>
                 <Input 
                   placeholder="Enter document name..." 
-                  value={documentForm.name}
-                  onChange={(e) => handleDocumentFormChange('name', e.target.value)}
+                  value={documentForm.documentName}
+                  onChange={(e) => handleDocumentFormChange('documentName', e.target.value)}
                 />
               </div>
               <div>
@@ -938,30 +1801,38 @@ const DocumentManagement = () => {
                   <label className="block text-sm font-medium mb-1">Document Type</label>
                   <select 
                     className="w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700"
-                    value={documentForm.type}
-                    onChange={(e) => handleDocumentFormChange('type', e.target.value)}
+                    value={documentForm.typeId}
+                    onChange={(e) => handleDocumentFormChange('typeId', e.target.value)}
                   >
-                    <option value="Policy">Policy</option>
-                    <option value="Template">Template</option>
-                    <option value="Certificate">Certificate</option>
-                    <option value="Personal">Personal</option>
-                    <option value="Training">Training</option>
-                    <option value="Compliance">Compliance</option>
+                    <option value="">Select Type</option>
+                    {dropdownLoading ? (
+                      <option disabled>Loading types...</option>
+                    ) : (
+                      activeTypes.map(type => (
+                        <option key={type.id} value={type.id}>
+                          {type.typeName}
+                        </option>
+                      ))
+                    )}
                   </select>
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-1">Category</label>
                   <select 
                     className="w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700"
-                    value={documentForm.category}
-                    onChange={(e) => handleDocumentFormChange('category', e.target.value)}
+                    value={documentForm.categoryId}
+                    onChange={(e) => handleDocumentFormChange('categoryId', e.target.value)}
                   >
-                    <option value="HR">HR Policies</option>
-                    <option value="Employee">Employee Documents</option>
-                    <option value="Performance">Performance</option>
-                    <option value="Training">Training Materials</option>
-                    <option value="Compliance">Compliance</option>
-                    <option value="Templates">Templates</option>
+                    <option value="">Select Category</option>
+                    {dropdownLoading ? (
+                      <option disabled>Loading categories...</option>
+                    ) : (
+                      activeCategories.map(category => (
+                        <option key={category.id} value={category.id}>
+                          {category.categoryName}
+                        </option>
+                      ))
+                    )}
                   </select>
                 </div>
               </div>
@@ -999,8 +1870,8 @@ const DocumentManagement = () => {
                 <label className="block text-sm font-medium mb-1">Document Name</label>
                 <Input 
                   placeholder="Enter document name..." 
-                  value={documentForm.name}
-                  onChange={(e) => handleDocumentFormChange('name', e.target.value)}
+                  value={documentForm.documentName}
+                  onChange={(e) => handleDocumentFormChange('documentName', e.target.value)}
                 />
               </div>
               <div>
@@ -1018,30 +1889,38 @@ const DocumentManagement = () => {
                   <label className="block text-sm font-medium mb-1">Document Type</label>
                   <select 
                     className="w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700"
-                    value={documentForm.type}
-                    onChange={(e) => handleDocumentFormChange('type', e.target.value)}
+                    value={documentForm.typeId}
+                    onChange={(e) => handleDocumentFormChange('typeId', e.target.value)}
                   >
-                    <option value="Policy">Policy</option>
-                    <option value="Template">Template</option>
-                    <option value="Certificate">Certificate</option>
-                    <option value="Personal">Personal</option>
-                    <option value="Training">Training</option>
-                    <option value="Compliance">Compliance</option>
+                    <option value="">Select Type</option>
+                    {dropdownLoading ? (
+                      <option disabled>Loading types...</option>
+                    ) : (
+                      activeTypes.map(type => (
+                        <option key={type.id} value={type.id}>
+                          {type.typeName}
+                        </option>
+                      ))
+                    )}
                   </select>
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-1">Category</label>
                   <select 
                     className="w-full p-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700"
-                    value={documentForm.category}
-                    onChange={(e) => handleDocumentFormChange('category', e.target.value)}
+                    value={documentForm.categoryId}
+                    onChange={(e) => handleDocumentFormChange('categoryId', e.target.value)}
                   >
-                    <option value="HR">HR Policies</option>
-                    <option value="Employee">Employee Documents</option>
-                    <option value="Performance">Performance</option>
-                    <option value="Training">Training Materials</option>
-                    <option value="Compliance">Compliance</option>
-                    <option value="Templates">Templates</option>
+                    <option value="">Select Category</option>
+                    {dropdownLoading ? (
+                      <option disabled>Loading categories...</option>
+                    ) : (
+                      activeCategories.map(category => (
+                        <option key={category.id} value={category.id}>
+                          {category.categoryName}
+                        </option>
+                      ))
+                    )}
                   </select>
                 </div>
               </div>
@@ -1062,89 +1941,189 @@ const DocumentManagement = () => {
       {/* View Document Modal */}
       {showViewModal && selectedDocument && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white dark:bg-gray-900 rounded-lg p-6 w-full max-w-2xl">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="text-xl font-semibold text-gray-900 dark:text-white">{selectedDocument.name}</h3>
+          <div className="bg-white dark:bg-gray-900 rounded-lg p-6 w-full max-w-3xl mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-6 border-b pb-4">
+              <div>
+                <h3 className="text-2xl font-bold text-gray-900 dark:text-white">{selectedDocument.documentName}</h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400">Document Details</p>
+              </div>
               <Button 
                 variant="ghost" 
                 size="sm" 
                 onClick={() => setShowViewModal(false)}
               >
-                <XCircle className="h-4 w-4" />
+                <XCircle className="h-5 w-5" />
               </Button>
             </div>
             
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Document Type</label>
-                  <p className="text-gray-900 dark:text-white font-medium">{selectedDocument.type}</p>
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Category</label>
-                  <p className="text-gray-900 dark:text-white">{selectedDocument.category}</p>
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Size</label>
-                  <p className="text-gray-900 dark:text-white">{selectedDocument.size}</p>
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Version</label>
-                  <p className="text-gray-900 dark:text-white">v{selectedDocument.version}</p>
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Uploaded By</label>
-                  <p className="text-gray-900 dark:text-white">{selectedDocument.uploadedBy}</p>
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Status</label>
-                  <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                    selectedDocument.status === 'active' 
-                      ? 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400'
-                      : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400'
-                  }`}>
-                    {selectedDocument.status?.toUpperCase()}
-                  </span>
-                </div>
-              </div>
-              
-              <div>
-                <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Description</label>
-                <div className="mt-2 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
-                  <p className="text-gray-900 dark:text-white">{selectedDocument.description || 'No description provided.'}</p>
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Last Modified</label>
-                  <p className="text-gray-900 dark:text-white">{selectedDocument.lastModified}</p>
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Access Level</label>
-                  <div className="flex items-center space-x-2">
-                    {selectedDocument.access === 'private' && <Lock className="h-4 w-4 text-gray-400" />}
-                    {selectedDocument.access === 'restricted' && <AlertTriangle className="h-4 w-4 text-yellow-500" />}
-                    {selectedDocument.access === 'public' && <Unlock className="h-4 w-4 text-green-500" />}
-                    <span className="text-gray-900 dark:text-white capitalize">{selectedDocument.access}</span>
+            <div className="space-y-6">
+              {/* Basic Information */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Basic Information</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Document Name</label>
+                      <p className="text-gray-900 dark:text-white font-medium">{selectedDocument.documentName}</p>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-gray-600 dark:text-gray-400">File Name</label>
+                      <p className="text-gray-900 dark:text-white">{selectedDocument.fileName || 'N/A'}</p>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Document Type</label>
+                      <p className="text-gray-900 dark:text-white font-medium">{selectedDocument.type?.typeName || 'Unknown'}</p>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Category</label>
+                      <p className="text-gray-900 dark:text-white">{selectedDocument.category?.categoryName || 'Unknown'}</p>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-gray-600 dark:text-gray-400">File Size</label>
+                      <p className="text-gray-900 dark:text-white">{(selectedDocument.fileSize / 1024 / 1024).toFixed(2)} MB</p>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Status</label>
+                      <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                        selectedDocument.isActive 
+                          ? 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400'
+                          : 'bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-400'
+                      }`}>
+                        {selectedDocument.isActive ? 'ACTIVE' : 'INACTIVE'}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              </div>
+                </CardContent>
+              </Card>
+
+              {/* Description */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Description</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                    <p className="text-gray-900 dark:text-white">
+                      {selectedDocument.description || 'No description provided.'}
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Upload Information */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Upload Information</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Uploaded By</label>
+                      <div className="flex items-center space-x-2 mt-1">
+                        <div className="bg-blue-100 dark:bg-blue-900/30 rounded-full p-1">
+                          <User className="h-3 w-3 text-blue-600 dark:text-blue-400" />
+                        </div>
+                        <p className="text-gray-900 dark:text-white font-medium">
+                          {selectedDocument.uploader?.name || 'Unknown User'}
+                        </p>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Upload Date</label>
+                      <p className="text-gray-900 dark:text-white">
+                        {new Date(selectedDocument.createdAt).toLocaleDateString('en-US', {
+                          year: 'numeric',
+                          month: 'long',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })}
+                      </p>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Last Modified</label>
+                      <p className="text-gray-900 dark:text-white">
+                        {new Date(selectedDocument.updatedAt).toLocaleDateString('en-US', {
+                          year: 'numeric',
+                          month: 'long',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })}
+                      </p>
+                    </div>
+                    <div>
+                      {/* <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Document ID</label> */}
+                      {/* <p className="text-gray-900 dark:text-white font-mono text-sm">{selectedDocument.id}</p> */}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* File Information */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">File Information</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <label className="text-sm font-medium text-gray-600 dark:text-gray-400">File Type</label>
+                      <p className="text-gray-900 dark:text-white font-medium">
+                        {selectedDocument.fileName?.split('.').pop()?.toUpperCase() || 'UNKNOWN'}
+                      </p>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-gray-600 dark:text-gray-400">MIME Type</label>
+                      <p className="text-gray-900 dark:text-white text-sm">
+                        {selectedDocument.mimeType || 'application/octet-stream'}
+                      </p>
+                    </div>
+                    {/* <div>
+                      <label className="text-sm font-medium text-gray-600 dark:text-gray-400">File Path</label>
+                      <p className="text-gray-900 dark:text-white text-sm font-mono">
+                        {selectedDocument.filePath ? selectedDocument.filePath.split('/').pop() : 'N/A'}
+                      </p>
+                    </div> */}
+                  </div>
+                </CardContent>
+              </Card>
             </div>
             
-            <div className="flex justify-end space-x-3 mt-6">
-              <Button variant="outline" onClick={() => setShowViewModal(false)}>
-                Close
-              </Button>
-              <Button 
-                variant="default"
-                onClick={() => {
-                  setShowViewModal(false);
-                  handleEditDocument(selectedDocument);
-                }}
-              >
-                Edit Document
-              </Button>
+            <div className="flex justify-between items-center mt-8 pt-6 border-t">
+              <div className="text-sm text-gray-500 dark:text-gray-400">
+                {/* <p>Document ID: {selectedDocument.id}</p> */}
+                <p>Created: {new Date(selectedDocument.createdAt).toLocaleDateString()}</p>
+              </div>
+              <div className="flex space-x-3">
+                <Button 
+                  variant="outline" 
+                  onClick={() => setShowViewModal(false)}
+                >
+                  Close
+                </Button>
+                <Button 
+                  variant="outline"
+                  onClick={() => handleDownloadDocument(selectedDocument.id)}
+                  className="flex items-center space-x-2"
+                >
+                  <Download className="h-4 w-4" />
+                  <span>Download</span>
+                </Button>
+                {/* <Button 
+                  variant="default"
+                  onClick={() => {
+                    setShowViewModal(false);
+                    handleEditDocument(selectedDocument);
+                  }}
+                  className="flex items-center space-x-2"
+                >
+                  <Edit className="h-4 w-4" />
+                  <span>Edit Document</span>
+                </Button> */}
+              </div>
             </div>
           </div>
         </div>
@@ -1396,6 +2375,18 @@ const DocumentManagement = () => {
           </div>
         </div>
       )}
+
+      {/* New Upload Modal */}
+      <DocumentUploadModal
+        isOpen={showUploadModal}
+        onClose={() => setShowUploadModal(false)}
+        onSuccess={(document) => {
+          console.log('Document uploaded successfully:', document);
+          toast.success('Document uploaded successfully!');
+          // Refresh document list to show new document
+          fetchRealDocuments();
+        }}
+      />
     </div>
   );
 };
