@@ -45,6 +45,7 @@ import LeaveManagement from './components/Leave/LeaveManagement';
 import PayrollManagement from './components/Payroll/PayrollManagement';
 import RecruitmentManagement from './components/Recruitment/RecruitmentManagement';
 import PerformanceManagement from './components/Performance/PerformanceManagement';
+import PerformanceEmployee from './components/Performance/PerformanceEmployee';
 import ExpenseManagement from './components/Expenses/ExpenseManagement';
 import EmployeeExpenseManagement from './components/Expenses/EmployeeExpenseManagement';
 import DocumentManagement from './components/Documents/DocumentManagement';
@@ -87,6 +88,7 @@ function App() {
                 <Route path="employee/dashboard" element={<EmployeeDashboardRouter />} />
                 <Route path="employee/attendance" element={<AttendanceManagement />} />
                 <Route path="employee/leave" element={<LeaveManagement />} />
+                <Route path="employee/performance" element={<PerformanceEmployee />} />
                 <Route path="employee/expenses" element={<EmployeeExpenseManagement />} />
                 <Route path="employee/documents" element={<DocumentManagement />} />
                 

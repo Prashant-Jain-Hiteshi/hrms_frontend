@@ -59,8 +59,8 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
     {
       title: 'Performance',
       icon: TrendingUp,
-      path: '/performance',
-      permission: 'performance'
+      path: user?.role === 'employee' ? '/employee/performance' : '/performance',
+      permission: user?.role === 'employee' ? null : 'performance'
     },
     {
       title: 'Expenses',
@@ -74,25 +74,24 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
       path: '/documents',
       permission: 'documents'
     },
-    {
-      title: 'Reports',
-      icon: FileText,
-      path: '/reports',
-      permission: 'reports'
-    }
+    // {
+    //   title: 'Reports',
+    //   icon: FileText,
+    //   path: '/reports',
+    //   permission: 'reports'
+    // }
   ];
 
   const filteredMenuItems = menuItems.filter(item => 
     !item.permission || hasPermission(item.permission) || hasPermission('all')
   );
 
-  // Employee Portal Items (for HR and Finance users to access employee view)
   const employeePortalItems = [
     {
       title: 'Dashboard',
       icon: LayoutDashboard,
       path: '/employee/dashboard',
-      description: 'My personal dashboard'
+      description: 'Employee overview'
     },
     {
       title: 'Attendance',
@@ -105,6 +104,12 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
       icon: Calendar,
       path: '/employee/leave',
       description: 'My leave requests'
+    },
+    {
+      title: 'Performance',
+      icon: TrendingUp,
+      path: '/employee/performance',
+      description: 'My performance goals and feedback'
     },
     {
       title: 'Expenses',
@@ -257,14 +262,14 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
           {/* Footer */}
           <div className="p-4 border-t border-white/20">
             <div className="space-y-2">
-              <NavLink
+              {/* <NavLink
                 to="/settings"
                 className="flex items-center space-x-3 px-3 py-2 rounded-lg text-sm font-medium text-white/80 hover:bg-white/10 hover:text-white transition-colors"
                 onClick={() => setIsOpen(false)}
               >
                 <Settings className="h-5 w-5" />
                 <span>Settings</span>
-              </NavLink>
+              </NavLink> */}
               <button
                 onClick={handleLogout}
                 className="flex items-center space-x-3 px-3 py-2 rounded-lg text-sm font-medium text-red-300 hover:bg-red-500/20 hover:text-red-200 transition-colors w-full text-left"

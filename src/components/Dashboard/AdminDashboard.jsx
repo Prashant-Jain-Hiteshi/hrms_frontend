@@ -489,14 +489,14 @@ const AdminDashboard = () => {
               <UserPlus className="h-6 w-6 text-primary mb-2" />
               <span className="text-sm font-medium">Add Employee</span>
             </Button>
-            <Button
+            {/* <Button
               variant="outline"
               className="flex flex-col items-center p-4 h-auto"
               onClick={() => navigate('/reports')}
             >
               <FileText className="h-6 w-6 text-primary mb-2" />
               <span className="text-sm font-medium">Generate Report</span>
-            </Button>
+            </Button> */}
             <Button
               variant="outline"
               className="flex flex-col items-center p-4 h-auto"

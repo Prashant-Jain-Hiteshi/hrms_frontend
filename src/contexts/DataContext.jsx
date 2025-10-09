@@ -4,6 +4,7 @@ import { useAuth } from './AuthContext';
 import { EmployeesAPI, AttendanceAPI, PayrollAPI, DepartmentAPI } from '../lib/api';
 import { LeaveAPI as LeaveCreditAPI } from '../lib/api';
 import { LeaveAPI } from '../lib/leaveApi';
+import { PerformanceAPI } from '../lib/performanceApi';
 
 // Create the context
 const DataContext = createContext();
@@ -967,25 +968,49 @@ const DataProvider = ({ children }) => {
   };
 
   // Performance CRUD operations
-  const addGoal = (goalData) => {
-    const newGoal = {
-      ...goalData,
-      id: Date.now(),
-      progress: 0,
-      status: 'pending'
-    };
-    setGoals(prev => [...prev, newGoal]);
-    return newGoal;
+  const addGoal = async (goalData) => {
+    try {
+      console.log('🎯 DataContext: Creating performance goal via API');
+      const response = await PerformanceAPI.goals.create(goalData);
+      const newGoal = response.data;
+      
+      // Update local state for immediate UI feedback
+      setGoals(prev => [...prev, newGoal]);
+      return newGoal;
+    } catch (error) {
+      console.error('❌ DataContext: Failed to create performance goal:', error);
+      throw error;
+    }
   };
 
-  const updateGoal = (goalId, goalData) => {
-    setGoals(prev => prev.map(goal => 
-      goal.id === goalId ? { ...goal, ...goalData } : goal
-    ));
+  const updateGoal = async (goalId, goalData) => {
+    try {
+      console.log('📝 DataContext: Updating performance goal via API');
+      const response = await PerformanceAPI.goals.update(goalId, goalData);
+      const updatedGoal = response.data;
+      
+      // Update local state
+      setGoals(prev => prev.map(goal => 
+        goal.id === goalId ? updatedGoal : goal
+      ));
+      return updatedGoal;
+    } catch (error) {
+      console.error('❌ DataContext: Failed to update performance goal:', error);
+      throw error;
+    }
   };
 
-  const deleteGoal = (goalId) => {
-    setGoals(prev => prev.filter(goal => goal.id !== goalId));
+  const deleteGoal = async (goalId) => {
+    try {
+      console.log('🗑️ DataContext: Deleting performance goal via API');
+      await PerformanceAPI.goals.delete(goalId);
+      
+      // Update local state
+      setGoals(prev => prev.filter(goal => goal.id !== goalId));
+    } catch (error) {
+      console.error('❌ DataContext: Failed to delete performance goal:', error);
+      throw error;
+    }
   };
 
   const addReview = (reviewData) => {

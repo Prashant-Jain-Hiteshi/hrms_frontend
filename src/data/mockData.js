@@ -8,7 +8,7 @@ export const MOCK_EMPLOYEES = [
 
 // Mock departments
 export const MOCK_DEPARTMENTS = [
-  { id: 1, name: 'Administration', headId: 1, employeeCount: 1 },
+  // { id: 1, name: 'Administration', headId: 1, employeeCount: 1 },
   { id: 2, name: 'Human Resources', headId: 2, employeeCount: 1 },
   { id: 3, name: 'Engineering', headId: 5, employeeCount: 2 },
   { id: 4, name: 'Finance', headId: 4, employeeCount: 1 }

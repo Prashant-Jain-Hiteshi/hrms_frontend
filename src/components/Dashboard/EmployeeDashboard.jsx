@@ -100,7 +100,7 @@ const EmployeeDashboard = () => {
   };
 
   const handlePerformance = () => {
-    navigate('/performance');
+    navigate('/employee/performance');
   };
 
   // Build weekly chart (current month only) with 4 buckets shown in UI
