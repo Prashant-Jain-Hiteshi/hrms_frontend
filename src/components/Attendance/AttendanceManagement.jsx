@@ -395,30 +395,8 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
       fetchAttendanceStatus();
       if (user.role === 'admin' || user.role === 'hr') {
         fetchAdminList();
-        // also fetch weekly overview from backend
-        (async () => {
-          try {
-            setWeeklyLoading(true);
-            const res = await AttendanceAPI.weekly();
-            const days = Array.isArray(res?.data?.days) ? res.data.days : [];
-            // Build names client-side from date to prevent server-timezone label drift
-            const toName = (iso) => {
-              try {
-                const [Y, M, D] = String(iso).split('-').map(Number);
-                const dd = new Date(Y, (M || 1) - 1, D || 1, 0, 0, 0, 0); // local date
-                return dd.toLocaleDateString('en-US', { weekday: 'short' });
-              } catch { return String(iso); }
-            };
-            const data = days
-              .map(d => ({ date: d.date, name: toName(d.date), present: d.present || 0, absent: d.absent || 0, late: d.late || 0 }))
-              .sort((a, b) => String(a.date).localeCompare(String(b.date)));
-            setWeeklyData(data);
-          } catch (e) {
-            setWeeklyData([]);
-          } finally {
-            setWeeklyLoading(false);
-          }
-        })();
+        // Load weekly overview from backend
+        loadWeeklyData();
       }
     }
   }, [user]);
@@ -1023,6 +1001,39 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
     setReportOpen(false);
   };
 
+  // Function to load weekly attendance data
+  const loadWeeklyData = async () => {
+    if (user?.role !== 'admin' && user?.role !== 'hr') {
+      return; // Only admin/HR need weekly data
+    }
+    
+    try {
+      setWeeklyLoading(true);
+      const res = await AttendanceAPI.weekly();
+      const days = Array.isArray(res?.data?.days) ? res.data.days : [];
+      
+      // Build names client-side from date to prevent server-timezone label drift
+      const toName = (iso) => {
+        try {
+          const [Y, M, D] = String(iso).split('-').map(Number);
+          const dd = new Date(Y, (M || 1) - 1, D || 1, 0, 0, 0, 0); // local date
+          return dd.toLocaleDateString('en-US', { weekday: 'short' });
+        } catch { return String(iso); }
+      };
+      
+      const data = days
+        .map(d => ({ date: d.date, name: toName(d.date), present: d.present || 0, absent: d.absent || 0, late: d.late || 0 }))
+        .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+      
+      setWeeklyData(data);
+    } catch (e) {
+      console.error('Failed to load weekly data:', e);
+      setWeeklyData([]);
+    } finally {
+      setWeeklyLoading(false);
+    }
+  };
+
   // 🚀 Comprehensive refresh function for attendance data
   // This function refreshes ONLY attendance-related data, not other modules
   const refreshAttendanceData = async () => {
@@ -1066,7 +1077,25 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
         })
       );
       
-      // 5. Refresh today's attendance stats
+      // 5. Refresh attendance totals/statistics (Present Today, Absent Today, etc.)
+      if (fetchAttendanceTotals) {
+        refreshPromises.push(
+          fetchAttendanceTotals().catch(err => {
+            console.error('Failed to refresh attendance totals:', err);
+          })
+        );
+      }
+      
+      // 6. Refresh calendar data (monthly view)
+      if (fetchCalendarData) {
+        refreshPromises.push(
+          fetchCalendarData().catch(err => {
+            console.error('Failed to refresh calendar data:', err);
+          })
+        );
+      }
+      
+      // 7. Refresh today's attendance stats
       const today = new Date().toISOString().split('T')[0];
       if (selectedDate === today) {
         // Only refresh stats if we're viewing today's data
@@ -1080,7 +1109,7 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
         );
       }
       
-      // 6. Execute all refreshes in parallel for better performance
+      // 8. Execute all refreshes in parallel for better performance
       await Promise.all(refreshPromises);
       
       console.log('✅ Attendance data refreshed successfully');

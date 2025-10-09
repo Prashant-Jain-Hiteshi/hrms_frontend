@@ -480,7 +480,7 @@ const ExpenseManagement = () => {
             <Download className="h-4 w-4" />
             <span>Export</span>
           </Button>
-          {canUserPerformAction('create_expense', user?.role) && (
+          {/* {canUserPerformAction('create_expense', user?.role) && (
             <Button 
               variant="default" 
               className="flex items-center space-x-2"
@@ -489,7 +489,7 @@ const ExpenseManagement = () => {
               <Plus className="h-4 w-4" />
               <span>Add Expense</span>
             </Button>
-          )}
+          )} */}
         </div>
       </div>
 
@@ -834,10 +834,10 @@ const ExpenseManagement = () => {
                   <option value="approved">Approved</option>
                   <option value="rejected">Rejected</option>
                 </select>
-                <Button variant="outline" className="flex items-center space-x-2" onClick={() => console.log('Filter functionality coming soon!')}>
+                {/* <Button variant="outline" className="flex items-center space-x-2" onClick={() => console.log('Filter functionality coming soon!')}>
                   <Filter className="h-4 w-4" />
                   <span>More Filters</span>
-                </Button>
+                </Button> */}
               </div>
             </CardContent>
           </Card>

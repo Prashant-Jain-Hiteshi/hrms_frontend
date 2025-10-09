@@ -208,10 +208,10 @@ const EmployeeList = () => {
               <option value="active">Active</option>
               <option value="inactive">Inactive</option>
             </select>
-            <Button variant="outline" className="flex items-center space-x-2" onClick={() => console.log('Filter functionality coming soon!')}>
+            {/* <Button variant="outline" className="flex items-center space-x-2" onClick={() => console.log('Filter functionality coming soon!')}>
               <Filter className="h-4 w-4" />
               <span>More Filters</span>
-            </Button>
+            </Button> */}
           </div>
         </CardContent>
       </Card>

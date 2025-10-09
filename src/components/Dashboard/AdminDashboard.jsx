@@ -409,7 +409,7 @@ const AdminDashboard = () => {
         </Card>
 
         {/* Upcoming Birthdays */}
-        <Card>
+        {/* <Card>
           <CardHeader>
             <CardTitle>Upcoming Birthdays</CardTitle>
             <CardDescription>This week's celebrations</CardDescription>
@@ -437,7 +437,7 @@ const AdminDashboard = () => {
             </div>
           </CardContent>
 
-        </Card>
+        </Card> */}
 
         {/* Recent Announcements */}
         <Card>

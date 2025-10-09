@@ -37,25 +37,77 @@ const PerformanceManagement = () => {
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [showViewAssignmentsModal, setShowViewAssignmentsModal] = useState(false);
   const [selectedGoal, setSelectedGoal] = useState(null);
+  const [exportLoading, setExportLoading] = useState(false);
 
   // Export functionality
-  const handleExportPerformance = () => {
-    const csvContent = generatePerformanceCSV();
-    const filename = `performance_report_${new Date().toISOString().split('T')[0]}.csv`;
-    downloadCSV(csvContent, filename);
+  const handleExportPerformance = async () => {
+    try {
+      setExportLoading(true);
+      console.log('📊 Exporting performance data...');
+      toast.success('Preparing export...');
+      
+      // Fetch feedback forms data from backend
+      const response = await PerformanceAPI.admin.getAllFeedbackSubmissions();
+      const feedbackData = response?.data || response || [];
+      
+      console.log('📊 Feedback data fetched for export:', feedbackData.length);
+      
+      if (feedbackData.length === 0) {
+        toast.error('No feedback data available to export');
+        return;
+      }
+      
+      const csvContent = generatePerformanceCSV(feedbackData);
+      const filename = `performance_feedback_report_${new Date().toISOString().split('T')[0]}.csv`;
+      downloadCSV(csvContent, filename);
+      
+      toast.success(`Exported ${feedbackData.length} feedback records successfully!`);
+      
+    } catch (error) {
+      console.error('❌ Error exporting performance data:', error);
+      toast.error('Failed to export performance data');
+    } finally {
+      setExportLoading(false);
+    }
   };
 
-  const generatePerformanceCSV = () => {
-    const headers = ['Employee', 'Goal', 'Progress', 'Status', 'Due Date', 'Priority', 'Description'];
-    const rows = goals.map(goal => [
-      goal.employee,
-      goal.title,
-      `${goal.progress}%`,
-      goal.status,
-      goal.dueDate,
-      goal.priority,
-      goal.description || 'N/A'
-    ]);
+  const generatePerformanceCSV = (feedbackData) => {
+    // CSV Headers - only essential feedback details
+    const headers = [
+      'Employee Name',
+      'Employee ID', 
+      'Goal Name',
+      'Goal Category',
+      'Submission Status',
+      'Submitted Date',
+      'Final Review Rating',
+      'Reviewer Comments',
+      'Review Date',
+      'Overall Performance Score'
+    ];
+    
+    // Generate rows with essential feedback data only
+    const rows = feedbackData.map(feedback => {
+      // Calculate overall performance score from ratings
+      const ratings = feedback.ratings || {};
+      const ratingValues = Object.values(ratings).filter(val => typeof val === 'number');
+      const avgRating = ratingValues.length > 0 
+        ? (ratingValues.reduce((sum, val) => sum + val, 0) / ratingValues.length).toFixed(1)
+        : 'N/A';
+      
+      return [
+        feedback.employeeName || 'N/A',
+        feedback.employeeId || 'N/A',
+        feedback.goalName || 'N/A',
+        feedback.category || 'N/A',
+        feedback.status || 'N/A',
+        feedback.submittedAt ? new Date(feedback.submittedAt).toLocaleDateString() : 'N/A',
+        feedback.overallRating || 'Not Reviewed',
+        feedback.reviewerComments ? `"${feedback.reviewerComments.replace(/"/g, '""')}"` : 'No Comments',
+        feedback.reviewedAt ? new Date(feedback.reviewedAt).toLocaleDateString() : 'Not Reviewed',
+        avgRating
+      ];
+    });
     
     return [headers, ...rows].map(row => row.join(',')).join('\n');
   };
@@ -357,9 +409,23 @@ const PerformanceManagement = () => {
           <p className="text-gray-600 dark:text-gray-400">Track goals, reviews, and team performance</p>
         </div>
         <div className="flex space-x-3">
-          <Button variant="outline" className="flex items-center space-x-2" onClick={handleExportPerformance}>
-            <Download className="h-4 w-4" />
-            <span>Export</span>
+          <Button 
+            variant="outline" 
+            className="flex items-center space-x-2" 
+            onClick={handleExportPerformance}
+            disabled={exportLoading}
+          >
+            {exportLoading ? (
+              <>
+                <Clock className="h-4 w-4 animate-spin" />
+                <span>Exporting...</span>
+              </>
+            ) : (
+              <>
+                <Download className="h-4 w-4" />
+                <span>Export</span>
+              </>
+            )}
           </Button>
           {canUserPerformAction('create_goal', user?.role) && (
             <Button onClick={() => setShowGoalModal(true)} variant="default" className="flex items-center space-x-2">

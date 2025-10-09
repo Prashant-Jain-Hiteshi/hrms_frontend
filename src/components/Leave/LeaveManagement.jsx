@@ -1579,8 +1579,8 @@ const LeaveManagement = () => {
                 className="border rounded px-3 py-2"
               >
                 <option value="public">Public</option>
-                <option value="restricted">Restricted</option>
-                <option value="optional">Optional</option>
+                {/* <option value="restricted">Restricted</option>
+                <option value="optional">Optional</option> */}
               </select>
               <button
                 type="submit"
@@ -1641,8 +1641,8 @@ const LeaveManagement = () => {
                             className="border rounded px-2 py-1"
                           >
                             <option value="public">Public</option>
-                            <option value="restricted">Restricted</option>
-                            <option value="optional">Optional</option>
+                            {/* <option value="restricted">Restricted</option>
+                            <option value="optional">Optional</option> */}
                           </select>
                         ) : (
                           h.type || 'public'

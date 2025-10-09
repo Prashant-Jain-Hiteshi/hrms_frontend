@@ -134,6 +134,9 @@ const EmployeeList = () => {
       const created = await addEmployee(employeeData);
       setShowAddModal(false);
       
+      // Refresh employee list to ensure consistency
+      await fetchEmployees(pagination.currentPage);
+      
       // Show success toast
       toast.success(`Employee "${employeeData.name}" has been added successfully!`, 5000);
       
@@ -280,10 +283,10 @@ const EmployeeList = () => {
                 <option key={status} value={status}>{status.charAt(0).toUpperCase() + status.slice(1)}</option>
               ))}
             </select>
-            <Button variant="outline" className="flex items-center space-x-2" onClick={() => console.log('Filter functionality coming soon!')}>
+            {/* <Button variant="outline" className="flex items-center space-x-2" onClick={() => console.log('Filter functionality coming soon!')}>
               <Filter className="h-4 w-4" />
               <span>More Filters</span>
-            </Button>
+            </Button> */}
           </div>
         </CardContent>
       </Card>

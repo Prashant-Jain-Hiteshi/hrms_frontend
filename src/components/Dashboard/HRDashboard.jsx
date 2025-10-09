@@ -208,7 +208,7 @@ const HRDashboard = () => {
         </Card>
 
         {/* Top Performers */}
-        <Card>
+        {/* <Card>
           <CardHeader>
             <CardTitle>Top Performers</CardTitle>
             <CardDescription>This quarter's stars</CardDescription>
@@ -232,7 +232,7 @@ const HRDashboard = () => {
               ))}
             </div>
           </CardContent>
-        </Card>
+        </Card> */}
 
         {/* Quick Actions */}
         <Card>
