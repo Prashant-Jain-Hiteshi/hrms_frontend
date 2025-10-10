@@ -241,13 +241,13 @@ const DocumentManagement = () => {
     }
 
     // Show confirmation dialog
-    const confirmDelete = window.confirm(
-      `Are you sure you want to delete "${document.documentName}"?\n\nThis action cannot be undone.`
-    );
+    // const confirmDelete = window.confirm(
+    //   `Are you sure you want to delete "${document.documentName}"?\n\nThis action cannot be undone.`
+    // );
     
-    if (!confirmDelete) {
-      return;
-    }
+    // if (!confirmDelete) {
+    //   return;
+    // }
 
     try {
       console.log('🗑️ Deleting document via API:', documentId, document.documentName);

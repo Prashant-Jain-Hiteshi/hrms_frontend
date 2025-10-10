@@ -9,6 +9,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { getDashboardStats, MOCK_LEAVE_REQUESTS, MOCK_JOB_OPENINGS } from '../../data/mockData';
 import { useData } from '../../contexts/DataContext';
 import { RecruitmentAPI } from '../../lib/api';
+import { LeaveAPI } from '../../lib/leaveApi';
 
 const HRDashboard = () => {
   const navigate = useNavigate();
@@ -27,6 +28,15 @@ const HRDashboard = () => {
   });
   const [loading, setLoading] = useState(true);
 
+  // State for leave statistics
+  const [leaveStats, setLeaveStats] = useState({
+    total: 0,
+    pending: 0,
+    approved: 0,
+    rejected: 0
+  });
+  const [leaveLoading, setLeaveLoading] = useState(true);
+
   // Load recruitment data
   const loadRecruitmentData = async () => {
     try {
@@ -44,15 +54,61 @@ const HRDashboard = () => {
     }
   };
 
+  // Load leave statistics
+  const loadLeaveStatistics = async () => {
+    try {
+      setLeaveLoading(true);
+      console.log('🔄 Loading leave statistics...');
+      const response = await LeaveAPI.admin.getOverallStats();
+      console.log('✅ Leave statistics loaded:', response.data);
+      setLeaveStats(response.data);
+    } catch (error) {
+      console.error('❌ Failed to load leave statistics:', error);
+      console.error('🔍 Error details:', error.response?.data);
+      // Keep default values on error
+    } finally {
+      setLeaveLoading(false);
+    }
+  };
+
   useEffect(() => {
     loadRecruitmentData();
+    loadLeaveStatistics();
   }, []);
 
-  const leaveStatusData = [
-    { name: 'Approved', value: 85, color: '#10b981' },
-    { name: 'Pending', value: 12, color: '#f59e0b' },
-    { name: 'Rejected', value: 3, color: '#ef4444' },
-  ];
+  // Calculate dynamic leave status data with percentages
+  const leaveStatusData = React.useMemo(() => {
+    const { total, pending, approved, rejected } = leaveStats;
+    
+    if (total === 0) {
+      return [
+        { name: 'Approved', value: 0, count: 0, color: '#10b981' },
+        { name: 'Pending', value: 0, count: 0, color: '#f59e0b' },
+        { name: 'Rejected', value: 0, count: 0, color: '#ef4444' },
+      ];
+    }
+
+    return [
+      { 
+        name: 'Approved', 
+        value: Math.round((approved / total) * 100), 
+        count: approved, 
+        color: '#10b981' 
+      },
+      { 
+        name: 'Pending', 
+        value: Math.round((pending / total) * 100), 
+        count: pending, 
+        color: '#f59e0b' 
+      },
+      { 
+        name: 'Rejected', 
+        value: Math.round((rejected / total) * 100), 
+        count: rejected, 
+        color: '#ef4444' 
+      },
+    ];
+  }, [leaveStats]);
 
   const topPerformers = [
     { name: 'Alice Cooper', department: 'Engineering', rating: 4.8 },
@@ -98,7 +154,7 @@ const HRDashboard = () => {
             <Calendar className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{stats.pendingLeaves}</div>
+            <div className="text-2xl font-bold">{leaveLoading ? '...' : leaveStats.pending}</div>
             <p className="text-xs text-muted-foreground">Awaiting approval</p>
           </CardContent>
         </Card>
@@ -147,31 +203,56 @@ const HRDashboard = () => {
         <Card>
           <CardHeader>
             <CardTitle>Leave Requests Status</CardTitle>
-            <CardDescription>Current month overview</CardDescription>
+            <CardDescription>
+              {leaveLoading ? 'Loading...' : `Total: ${leaveStats.total} requests`}
+            </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
-              {leaveStatusData.map((status, index) => (
-                <div key={index} className="flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-4 h-4 rounded-full" style={{ backgroundColor: status.color }}></div>
-                    <span className="text-sm font-medium">{status.name}</span>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <div className="w-32 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                      <div 
-                        className="h-2 rounded-full" 
-                        style={{ 
-                          backgroundColor: status.color, 
-                          width: `${status.value}%` 
-                        }}
-                      ></div>
+            {leaveLoading ? (
+              <div className="space-y-4">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-4 h-4 rounded-full bg-gray-200 dark:bg-gray-700 animate-pulse"></div>
+                      <div className="w-16 h-4 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
                     </div>
-                    <span className="text-sm font-bold">{status.value}%</span>
+                    <div className="flex items-center space-x-2">
+                      <div className="w-32 bg-gray-200 dark:bg-gray-700 rounded-full h-2 animate-pulse"></div>
+                      <div className="w-8 h-4 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : leaveStats.total === 0 ? (
+              <div className="text-center text-muted-foreground py-8">
+                <Calendar className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>No leave requests found</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {leaveStatusData.map((status, index) => (
+                  <div key={index} className="flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-4 h-4 rounded-full" style={{ backgroundColor: status.color }}></div>
+                      <span className="text-sm font-medium">{status.name}</span>
+                      <span className="text-xs text-muted-foreground">({status.count})</span>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <div className="w-32 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                        <div 
+                          className="h-2 rounded-full transition-all duration-300" 
+                          style={{ 
+                            backgroundColor: status.color, 
+                            width: `${status.value}%` 
+                          }}
+                        ></div>
+                      </div>
+                      <span className="text-sm font-bold">{status.value}%</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -276,7 +357,7 @@ const HRDashboard = () => {
       </div>
 
       {/* Recent Activities */}
-      <Card>
+      {/* <Card>
         <CardHeader>
           <CardTitle>Recent Activities</CardTitle>
           <CardDescription>Latest HR activities</CardDescription>
@@ -306,7 +387,7 @@ const HRDashboard = () => {
             </div>
           </div>
         </CardContent>
-      </Card>
+      </Card> */}
     </div>
   );
 };
