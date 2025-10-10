@@ -311,14 +311,14 @@ const EmployeeList = () => {
             </div>
           </CardContent>
         </Card>
-        <Card>
+        {/* <Card>
           <CardContent className="pt-6">
             <div className="text-center">
               <div className="text-2xl font-bold text-blue-600">{MOCK_DEPARTMENTS.length}</div>
               <div className="text-sm text-muted-foreground">Departments</div>
             </div>
           </CardContent>
-        </Card>
+        </Card> */}
         <Card>
           <CardContent className="pt-6">
             <div className="text-center">

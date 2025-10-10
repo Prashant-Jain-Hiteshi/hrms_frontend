@@ -7,14 +7,16 @@ import {
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
 import { getDashboardStats, MOCK_LEAVE_REQUESTS, MOCK_JOB_OPENINGS } from '../../data/mockData';
-import { useData } from '../../contexts/DataContext';
-import { RecruitmentAPI } from '../../lib/api';
+import { RecruitmentAPI, EmployeesAPI } from '../../lib/api';
 import { LeaveAPI } from '../../lib/leaveApi';
 
 const HRDashboard = () => {
   const navigate = useNavigate();
   const stats = getDashboardStats('hr');
-  const { employees } = useData();
+
+  // State for employees data
+  const [employees, setEmployees] = useState([]);
+  const [employeesLoading, setEmployeesLoading] = useState(true);
   const totalActiveEmployees = Array.isArray(employees)
     ? employees.filter(e => (e.status || 'active') === 'active').length
     : 0;
@@ -71,9 +73,32 @@ const HRDashboard = () => {
     }
   };
 
+  // Load employees data
+  const loadEmployeesData = async () => {
+    try {
+      setEmployeesLoading(true);
+      console.log('🔄 Loading employees data...');
+      const response = await EmployeesAPI.list({ status: 'active' });
+      console.log('✅ Employees data loaded:', response.data);
+      
+      // Handle different response structures
+      const employeesData = response.data?.employees || response.data?.data || response.data || [];
+      setEmployees(employeesData);
+      console.log(`📊 Total active employees: ${employeesData.length}`);
+    } catch (error) {
+      console.error('❌ Failed to load employees data:', error);
+      console.error('🔍 Error details:', error.response?.data);
+      // Keep empty array on error
+      setEmployees([]);
+    } finally {
+      setEmployeesLoading(false);
+    }
+  };
+
   useEffect(() => {
     loadRecruitmentData();
     loadLeaveStatistics();
+    loadEmployeesData();
   }, []);
 
   // Calculate dynamic leave status data with percentages
@@ -132,7 +157,7 @@ const HRDashboard = () => {
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{totalActiveEmployees}</div>
+            <div className="text-2xl font-bold">{employeesLoading ? '...' : totalActiveEmployees}</div>
             <p className="text-xs text-muted-foreground">Active workforce</p>
           </CardContent>
         </Card>

@@ -82,9 +82,15 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
     // }
   ];
 
-  const filteredMenuItems = menuItems.filter(item => 
-    !item.permission || hasPermission(item.permission) || hasPermission('all')
-  );
+  const filteredMenuItems = menuItems.filter(item => {
+    // Hide Performance tab for finance role users
+    if (item.title === 'Performance' && user?.role === 'Finance') {
+      return false;
+    }
+    
+    // Apply existing permission checks
+    return !item.permission || hasPermission(item.permission) || hasPermission('all');
+  });
 
   const employeePortalItems = [
     {
@@ -105,12 +111,12 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
       path: '/employee/leave',
       description: 'My leave requests'
     },
-    {
-      title: 'Performance',
-      icon: TrendingUp,
-      path: '/employee/performance',
-      description: 'My performance goals and feedback'
-    },
+    // {
+    //   title: 'Performance',
+    //   icon: TrendingUp,
+    //   path: '/employee/performance',
+    //   description: 'My performance goals and feedback'
+    // },
     {
       title: 'Expenses',
       icon: Receipt,

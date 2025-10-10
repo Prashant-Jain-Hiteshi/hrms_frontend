@@ -10,7 +10,8 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { getDashboardStats, MOCK_ANNOUNCEMENTS } from '../../data/mockData';
 import { useData } from '../../contexts/DataContext';
 import { useAuth } from '../../contexts/AuthContext';
-import { LeaveAPI } from '../../lib/api';
+import { LeaveAPI, api } from '../../lib/api';
+import { expenseReimbursementAPI } from '../../lib/expenseReimbursementApi';
 
 const EmployeeDashboard = () => {
   const navigate = useNavigate();
@@ -22,6 +23,14 @@ const EmployeeDashboard = () => {
   // DOJ-based leave balance state
   const [leaveBalanceMap, setLeaveBalanceMap] = useState({});
   const [leaveBalanceLoading, setLeaveBalanceLoading] = useState(false);
+
+  // Payslip state
+  const [recentPayslips, setRecentPayslips] = useState([]);
+  const [payslipsLoading, setPayslipsLoading] = useState(false);
+
+  // Expense state
+  const [recentExpenses, setRecentExpenses] = useState([]);
+  const [expensesLoading, setExpensesLoading] = useState(false);
 
   // Load my attendance for current month (for today status and month count)
   useEffect(() => {
@@ -47,6 +56,14 @@ const EmployeeDashboard = () => {
     })();
     return () => { mounted = false; };
   }, []);
+
+  // Fetch recent payslips when component mounts
+  useEffect(() => {
+    if (user) {
+      fetchRecentPayslips();
+      fetchRecentExpenses();
+    }
+  }, [user]);
 
   // Get employee-specific data
   const myLeaveRequests = leaveRequests.filter(req => 
@@ -96,7 +113,7 @@ const EmployeeDashboard = () => {
   };
 
   const handleViewPayslip = () => {
-    navigate('/payroll');
+    navigate('/documents');
   };
 
   const handlePerformance = () => {
@@ -124,11 +141,184 @@ const EmployeeDashboard = () => {
     { name: 'Available', value: Number(totals.remaining.toFixed(2)), color: '#10b981' },
   ];
 
-  const recentPayslips = [
-    { month: 'June 2024', amount: '₹67,000', status: 'Paid' },
-    { month: 'May 2024', amount: '₹67,000', status: 'Paid' },
-    { month: 'April 2024', amount: '₹65,000', status: 'Paid' },
-  ];
+  // Function to fetch recent payslips using the correct employee API
+  const fetchRecentPayslips = async () => {
+    try {
+      setPayslipsLoading(true);
+      console.log('🔄 Loading recent payslips from employee API...');
+      
+      // Use the specific employee payslips API endpoint
+      const response = await api.get('/payroll/employee/my-payslips');
+      
+      console.log('✅ Employee payslips data loaded:', response.data);
+      
+      // Handle different response structures
+      const payslipsData = response.data?.payslips || response.data?.data || response.data || [];
+      
+      // Transform data to match UI format and get only the 3 most recent
+      const transformedPayslips = payslipsData
+        .sort((a, b) => new Date(b.payrollMonth || b.month) - new Date(a.payrollMonth || a.month)) // Sort by date desc
+        .slice(0, 3) // Take only 3 most recent
+        .map(payroll => {
+          // Extract net salary from nested salary object or root level
+          const netSalary = payroll.salary?.netSalary || 
+                           payroll.netSalary || 
+                           payroll.salary?.netAmount || 
+                           payroll.netAmount || 
+                           payroll.amount || 
+                           0;
+          
+          return {
+            id: payroll.id,
+            month: formatPayrollMonth(payroll.payrollMonth || payroll.month),
+            amount: `₹${parseFloat(netSalary).toLocaleString('en-IN')}`,
+            status: getPayslipStatus(payroll.status),
+            payrollMonth: payroll.payrollMonth || payroll.month,
+            employeeName: payroll.employee?.name || 'Unknown',
+            originalData: payroll // Keep original for debugging
+          };
+        });
+      
+      setRecentPayslips(transformedPayslips);
+      console.log(`📊 Recent payslips loaded: ${transformedPayslips.length}`);
+      
+    } catch (error) {
+      console.error('❌ Failed to load payslips:', error);
+      console.error('🔍 Error details:', error.response?.data);
+      // Keep empty array on error
+      setRecentPayslips([]);
+    } finally {
+      setPayslipsLoading(false);
+    }
+  };
+
+  // Function to fetch recent expenses using the expense reimbursement API
+  const fetchRecentExpenses = async () => {
+    try {
+      setExpensesLoading(true);
+      console.log('🔄 Loading recent expenses from API...');
+      
+      // Use the expense reimbursement API to get employee's requests
+      const response = await expenseReimbursementAPI.getMyRequests();
+      
+      console.log('✅ Employee expenses data loaded:', response);
+      
+      // Handle different response structures
+      const expensesData = response?.requests || response?.data || response || [];
+      
+      // Transform data to match UI format and get only the 3 most recent
+      const transformedExpenses = expensesData
+        .sort((a, b) => new Date(b.createdAt || b.date) - new Date(a.createdAt || a.date)) // Sort by date desc
+        .slice(0, 3) // Take only 3 most recent
+        .map(expense => {
+          // Extract amount from different possible fields
+          const amount = expense.amount || expense.totalAmount || expense.requestedAmount || 0;
+          
+          return {
+            id: expense.id,
+            title: expense.description || expense.title || expense.category || 'Expense',
+            date: formatExpenseDate(expense.createdAt || expense.date),
+            amount: `₹${parseFloat(amount).toLocaleString('en-IN')}`,
+            status: getExpenseStatus(expense.status),
+            category: expense.category || 'General',
+            originalData: expense // Keep original for debugging
+          };
+        });
+      
+      setRecentExpenses(transformedExpenses);
+      console.log(`📊 Recent expenses loaded: ${transformedExpenses.length}`);
+      
+    } catch (error) {
+      console.error('❌ Failed to load expenses:', error);
+      console.error('🔍 Error details:', error.response?.data);
+      // Keep empty array on error
+      setRecentExpenses([]);
+    } finally {
+      setExpensesLoading(false);
+    }
+  };
+
+  // Helper function to get expense status
+  const getExpenseStatus = (status) => {
+    if (!status) return 'Submitted';
+    
+    const statusLower = status.toLowerCase();
+    if (statusLower === 'approved' || statusLower === 'paid') {
+      return 'Approved';
+    } else if (statusLower === 'pending' || statusLower === 'submitted') {
+      return 'Pending';
+    } else if (statusLower === 'rejected' || statusLower === 'cancelled') {
+      return 'Rejected';
+    }
+    return status; // Return original if not recognized
+  };
+
+  // Helper function to format expense date
+  const formatExpenseDate = (dateString) => {
+    try {
+      if (!dateString) return 'Unknown';
+      
+      const date = new Date(dateString);
+      return date.toLocaleDateString('en-US', { 
+        month: 'short', 
+        day: 'numeric', 
+        year: 'numeric' 
+      });
+    } catch (error) {
+      console.error('Error formatting expense date:', error);
+      return dateString || 'Unknown';
+    }
+  };
+
+  // Helper function to get payslip status
+  const getPayslipStatus = (status) => {
+    if (!status) return 'Processing';
+    
+    const statusLower = status.toLowerCase();
+    if (statusLower === 'approved' || 
+        statusLower === 'paid' || 
+        statusLower === 'completed' ||
+        statusLower === 'finance_approved' ||
+        statusLower === 'hr_approved') {
+      return 'Paid';
+    } else if (statusLower === 'pending' || 
+               statusLower === 'processing' ||
+               statusLower === 'hr_pending' ||
+               statusLower === 'finance_pending') {
+      return 'Pending';
+    } else if (statusLower === 'rejected' || 
+               statusLower === 'cancelled' ||
+               statusLower === 'hr_rejected' ||
+               statusLower === 'finance_rejected') {
+      return 'Rejected';
+    }
+    return status; // Return original if not recognized
+  };
+
+  // Helper function to format payroll month
+  const formatPayrollMonth = (payrollMonth) => {
+    try {
+      if (!payrollMonth) return 'Unknown';
+      
+      // Handle different date formats
+      let date;
+      if (payrollMonth.includes('-')) {
+        // Format: YYYY-MM or YYYY-MM-DD
+        const [year, month] = payrollMonth.split('-');
+        date = new Date(parseInt(year), parseInt(month) - 1);
+      } else {
+        date = new Date(payrollMonth);
+      }
+      
+      return date.toLocaleDateString('en-US', { 
+        year: 'numeric', 
+        month: 'long' 
+      });
+    } catch (error) {
+      console.error('Error formatting payroll month:', error);
+      return payrollMonth || 'Unknown';
+    }
+  };
 
   const upcomingTasks = [
     { task: 'Complete React certification', deadline: 'Aug 30', priority: 'high' },
@@ -168,7 +358,7 @@ const EmployeeDashboard = () => {
           </CardContent>
         </Card>
 
-        <Card>
+        {/* <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Pending Tasks</CardTitle>
             <AlertCircle className="h-4 w-4 text-muted-foreground" />
@@ -177,7 +367,7 @@ const EmployeeDashboard = () => {
             <div className="text-2xl font-bold">{pendingTasks}</div>
             <p className="text-xs text-muted-foreground">To complete</p>
           </CardContent>
-        </Card>
+        </Card> */}
 
       </div>
 
@@ -249,30 +439,69 @@ const EmployeeDashboard = () => {
         <Card>
           <CardHeader>
             <CardTitle>Recent Payslips</CardTitle>
-            <CardDescription>Your salary history</CardDescription>
+            <CardDescription>
+              {payslipsLoading ? 'Loading...' : `Your salary history (${recentPayslips.length} recent)`}
+            </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
-              {recentPayslips.map((payslip, index) => (
-                <div key={index} className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-800 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors" onClick={handleViewPayslip}>
-                  <div className="flex items-center space-x-3">
-                    <div className="bg-green-100 dark:bg-green-900/20 rounded-full p-2">
-                      <DollarSign className="h-4 w-4 text-green-600" />
+            {payslipsLoading ? (
+              <div className="space-y-4">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-800 animate-pulse">
+                    <div className="flex items-center space-x-3">
+                      <div className="bg-gray-200 dark:bg-gray-700 rounded-full p-2 w-8 h-8"></div>
+                      <div>
+                        <div className="w-20 h-4 bg-gray-200 dark:bg-gray-700 rounded mb-1"></div>
+                        <div className="w-12 h-3 bg-gray-200 dark:bg-gray-700 rounded"></div>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-sm font-medium">{payslip.month}</p>
-                      <p className="text-xs text-muted-foreground">{payslip.status}</p>
-                    </div>
+                    <div className="w-16 h-4 bg-gray-200 dark:bg-gray-700 rounded"></div>
                   </div>
-                  <div className="text-sm font-bold">{payslip.amount}</div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : recentPayslips.length === 0 ? (
+              <div className="text-center text-muted-foreground py-8">
+                <Receipt className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>No payslips found</p>
+                <p className="text-xs mt-1">Your payslips will appear here once processed</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {recentPayslips.map((payslip, index) => (
+                  <div 
+                    key={payslip.id || index} 
+                    className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-800 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors" 
+                    onClick={handleViewPayslip}
+                  >
+                    <div className="flex items-center space-x-3">
+                      <div className={`rounded-full p-2 ${
+                        payslip.status === 'Paid' ? 'bg-green-100 dark:bg-green-900/20' :
+                        payslip.status === 'Pending' ? 'bg-yellow-100 dark:bg-yellow-900/20' :
+                        payslip.status === 'Rejected' ? 'bg-red-100 dark:bg-red-900/20' :
+                        'bg-gray-100 dark:bg-gray-900/20'
+                      }`}>
+                        <DollarSign className={`h-4 w-4 ${
+                          payslip.status === 'Paid' ? 'text-green-600' :
+                          payslip.status === 'Pending' ? 'text-yellow-600' :
+                          payslip.status === 'Rejected' ? 'text-red-600' :
+                          'text-gray-600'
+                        }`} />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium">{payslip.month}</p>
+                        <p className="text-xs text-muted-foreground">{payslip.status}</p>
+                      </div>
+                    </div>
+                    <div className="text-sm font-bold">{payslip.amount}</div>
+                  </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
 
         {/* Upcoming Tasks */}
-        <Card>
+        {/* <Card>
           <CardHeader>
             <CardTitle>Upcoming Tasks</CardTitle>
             <CardDescription>Your pending assignments</CardDescription>
@@ -292,6 +521,91 @@ const EmployeeDashboard = () => {
                 </div>
               ))}
             </div>
+          </CardContent>
+        </Card> */}
+        <Card>
+          <CardHeader>
+            <div className="flex justify-between items-center">
+              <div>
+                <CardTitle>Recent Expenses</CardTitle>
+                <CardDescription>
+                  {expensesLoading ? 'Loading...' : `Your submitted expense claims (${recentExpenses.length} recent)`}
+                </CardDescription>
+              </div>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => navigate('/employee/expenses')}
+              >
+                View All
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {expensesLoading ? (
+              <div className="space-y-4">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-800 animate-pulse">
+                    <div className="flex items-center space-x-3">
+                      <div className="bg-gray-200 dark:bg-gray-700 rounded-full w-5 h-5"></div>
+                      <div>
+                        <div className="w-32 h-4 bg-gray-200 dark:bg-gray-700 rounded mb-1"></div>
+                        <div className="w-20 h-3 bg-gray-200 dark:bg-gray-700 rounded"></div>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="w-16 h-4 bg-gray-200 dark:bg-gray-700 rounded mb-1"></div>
+                      <div className="w-12 h-5 bg-gray-200 dark:bg-gray-700 rounded"></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : recentExpenses.length === 0 ? (
+              <div className="text-center text-muted-foreground py-8">
+                <Receipt className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>No expense claims found</p>
+                <p className="text-xs mt-1">Your expense claims will appear here once submitted</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {recentExpenses.map((expense, index) => (
+                  <div 
+                    key={expense.id || index} 
+                    className={`flex items-center justify-between p-3 rounded-lg cursor-pointer hover:opacity-80 transition-colors ${
+                      expense.status === 'Approved' ? 'bg-green-50 dark:bg-green-900/20' :
+                      expense.status === 'Pending' ? 'bg-yellow-50 dark:bg-yellow-900/20' :
+                      expense.status === 'Rejected' ? 'bg-red-50 dark:bg-red-900/20' :
+                      'bg-gray-50 dark:bg-gray-900/20'
+                    }`}
+                    onClick={() => navigate('/employee/expenses')}
+                  >
+                    <div className="flex items-center space-x-3">
+                      <Receipt className={`h-5 w-5 ${
+                        expense.status === 'Approved' ? 'text-green-600' :
+                        expense.status === 'Pending' ? 'text-yellow-600' :
+                        expense.status === 'Rejected' ? 'text-red-600' :
+                        'text-gray-600'
+                      }`} />
+                      <div>
+                        <p className="text-sm font-medium">{expense.title}</p>
+                        <p className="text-xs text-muted-foreground">{expense.date}</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-bold">{expense.amount}</p>
+                      <span className={`px-2 py-1 rounded-full text-xs ${
+                        expense.status === 'Approved' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' :
+                        expense.status === 'Pending' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                        expense.status === 'Rejected' ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400' :
+                        'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400'
+                      }`}>
+                        {expense.status}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -371,7 +685,7 @@ const EmployeeDashboard = () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Today's Schedule */}
-        <Card>
+        {/* <Card>
           <CardHeader>
             <CardTitle>Today's Schedule</CardTitle>
             <CardDescription>Your agenda for today</CardDescription>
@@ -394,10 +708,10 @@ const EmployeeDashboard = () => {
               </div>
             </div>
           </CardContent>
-        </Card>
+        </Card> */}
 
         {/* Recent Expenses */}
-        <Card>
+        {/* <Card>
           <CardHeader>
             <div className="flex justify-between items-center">
               <div>
@@ -462,11 +776,11 @@ const EmployeeDashboard = () => {
               </div>
             </div>
           </CardContent>
-        </Card>
+        </Card> */}
       </div>
 
       {/* Expense Summary Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      {/* <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <Card>
           <CardContent className="pt-6">
             <div className="flex items-center">
@@ -508,7 +822,7 @@ const EmployeeDashboard = () => {
             </div>
           </CardContent>
         </Card>
-      </div>
+      </div> */}
     </div>
   );
 };

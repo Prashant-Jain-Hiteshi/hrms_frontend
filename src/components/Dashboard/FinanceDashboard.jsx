@@ -107,14 +107,11 @@ const FinanceDashboard = () => {
         let processedCount = 0;
         
         if (summaryData) {
-          // Use the totalAmount from the API response structure you showed
-          monthlyTotal = summaryData.totalAmount || 0;
+          // Only use completed transfers amount (not total amount which includes pending)
+          monthlyTotal = summaryData.completed?.amount || 0;
           
-          // Calculate processed count (completed + processing)
-          processedCount = (summaryData.completed?.count || 0) + (summaryData.processing?.count || 0);
-          
-          console.log('💰 Monthly Total from Summary:', monthlyTotal);
-          console.log('📊 Processed Count from Summary:', processedCount);
+          console.log('💰 Monthly Total from Completed Transfers Only:', monthlyTotal);
+          console.log('📊 Total Amount (all statuses):', summaryData.totalAmount || 0);
           console.log('📈 Summary breakdown:', {
             totalEmployees: summaryData.totalEmployees,
             totalAmount: summaryData.totalAmount,
@@ -122,6 +119,11 @@ const FinanceDashboard = () => {
             completed: summaryData.completed,
             processing: summaryData.processing
           });
+          
+          // Calculate processed count (completed + processing)
+          processedCount = (summaryData.completed?.count || 0) + (summaryData.processing?.count || 0);
+          
+          console.log('📊 Processed Count from Summary:', processedCount);
         }
         
         console.log('💰 Final Monthly Total:', monthlyTotal);
@@ -185,32 +187,38 @@ const FinanceDashboard = () => {
             const monthSummary = await HRPayrollAPI.getBankTransferSummary(monthKey);
             const monthSummaryData = monthSummary?.data || monthSummary;
             
-            let amount = 0;
-            if (monthSummaryData && monthSummaryData.totalAmount) {
-              amount = monthSummaryData.totalAmount;
-              console.log(`💰 ${monthName}: ₹${amount.toLocaleString()} (real data)`);
+            if (monthSummaryData && monthSummaryData.completed?.amount) {
+              // Only use completed transfers amount (same as Total Payroll card)
+              const amount = monthSummaryData.completed.amount;
+              console.log(`💰 ${monthName}: ₹${amount.toLocaleString()} (completed transfers only)`);
+              console.log(`📊 ${monthName} - Total Amount: ₹${(monthSummaryData.totalAmount || 0).toLocaleString()}, Completed: ₹${amount.toLocaleString()}`);
+              return {
+                name: monthName,
+                amount: Math.round(amount),
+                monthKey,
+                index,
+                hasData: true
+              };
             } else {
-              // Fallback to mock data for months with no data
-              amount = 380000 + (Math.random() * 20000);
-              console.log(`💰 ${monthName}: ₹${amount.toLocaleString()} (mock data - no backend data)`);
+              console.log(`📊 ${monthName}: No completed payroll transfers found`);
+              console.log(`📊 ${monthName} - Summary data:`, monthSummaryData);
+              return {
+                name: monthName,
+                amount: 0,
+                monthKey,
+                index,
+                hasData: false
+              };
             }
-            
-            return {
-              name: monthName,
-              amount: Math.round(amount),
-              monthKey,
-              index
-            };
             
           } catch (error) {
             console.warn(`⚠️ Error fetching data for ${monthName} (${monthKey}):`, error);
-            // Fallback to mock data on error
-            const fallbackAmount = 380000 + (Math.random() * 20000);
             return {
               name: monthName,
-              amount: Math.round(fallbackAmount),
+              amount: 0,
               monthKey,
-              index
+              index,
+              hasData: false
             };
           }
         });
@@ -218,12 +226,19 @@ const FinanceDashboard = () => {
         // Wait for all month data to be fetched
         const monthResults = await Promise.all(monthPromises);
         
-        // Sort by index to maintain chronological order
+        console.log('📊 All month results:', monthResults);
+        console.log('📊 Months with data:', monthResults.filter(m => m.hasData));
+        console.log('📊 Months without data:', monthResults.filter(m => !m.hasData));
+        
+        // Filter only months with real data and sort by index to maintain chronological order
         const payrollTrends = monthResults
+          .filter(month => month.hasData) // Only include months with real payroll data
           .sort((a, b) => b.index - a.index)
           .map(({ name, amount }) => ({ name, amount }));
         
         console.log('📈 Final Payroll Trends Data:', payrollTrends);
+        console.log('📊 Payroll Trends Length:', payrollTrends.length);
+        console.log('🔍 Payroll Trends Empty?', payrollTrends.length === 0);
         
         const finalData = {
           monthlyPayroll: monthlyTotal,
@@ -257,15 +272,7 @@ const FinanceDashboard = () => {
     fetchDashboardData();
   }, [user, currentMonth]);
 
-  // Mock data for fallback (kept for sections without backend support)
-  const payrollData = [
-    { name: 'Jan', amount: 380000 },
-    { name: 'Feb', amount: 385000 },
-    { name: 'Mar', amount: 390000 },
-    { name: 'Apr', amount: 385000 },
-    { name: 'May', amount: 387000 },
-    { name: 'Jun', amount: 387000 },
-  ];
+  // Mock data removed - no longer using fallback mock data for payroll trends
 
   const expenseData = [
     { name: 'Travel', amount: 45000, color: '#3b82f6' },
@@ -296,11 +303,11 @@ const FinanceDashboard = () => {
                 `₹${realData.monthlyPayroll?.toLocaleString() || 0}`
               )}
             </div>
-            <p className="text-xs text-muted-foreground">Current month</p>
+            <p className="text-xs text-muted-foreground">Completed transfers only</p>
           </CardContent>
         </Card>
 
-        <Card>
+        {/* <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Pending Expenses</CardTitle>
             <Receipt className="h-4 w-4 text-muted-foreground" />
@@ -309,7 +316,7 @@ const FinanceDashboard = () => {
             <div className="text-2xl font-bold">{stats.pendingExpenses}</div>
             <p className="text-xs text-muted-foreground">Awaiting approval</p>
           </CardContent>
-        </Card>
+        </Card> */}
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -328,7 +335,7 @@ const FinanceDashboard = () => {
           </CardContent>
         </Card>
 
-        <Card>
+        {/* <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Budget Utilization</CardTitle>
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
@@ -337,7 +344,7 @@ const FinanceDashboard = () => {
             <div className="text-2xl font-bold">{stats.budgetUtilization}%</div>
             <p className="text-xs text-muted-foreground">Of annual budget</p>
           </CardContent>
-        </Card>
+        </Card> */}
       </div>
 
       {/* Charts Row */}
@@ -346,16 +353,23 @@ const FinanceDashboard = () => {
         <Card>
           <CardHeader>
             <CardTitle>Payroll Trends</CardTitle>
-            <CardDescription>Monthly payroll expenses</CardDescription>
+            <CardDescription>
+              Monthly completed transfers 
+              {!realData.loading && (
+                <span className="text-xs ml-2">
+                  ({realData.payrollTrends.length} months of data)
+                </span>
+              )}
+            </CardDescription>
           </CardHeader>
           <CardContent>
             {realData.loading ? (
               <div className="animate-pulse">
                 <div className="bg-gray-200 dark:bg-gray-700 h-[300px] w-full rounded"></div>
               </div>
-            ) : (
+            ) : realData.payrollTrends.length > 0 ? (
               <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={realData.payrollTrends.length > 0 ? realData.payrollTrends : payrollData}>
+                <LineChart data={realData.payrollTrends}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis dataKey="name" />
                   <YAxis />
@@ -363,12 +377,19 @@ const FinanceDashboard = () => {
                   <Line type="monotone" dataKey="amount" stroke="#3b82f6" strokeWidth={2} />
                 </LineChart>
               </ResponsiveContainer>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-[300px] text-center text-muted-foreground">
+                <PieChart className="h-16 w-16 mb-4 opacity-50" />
+                <h3 className="text-lg font-medium mb-2">No Payroll Data Available</h3>
+                <p className="text-sm">Payroll trends will appear here once payroll records are processed</p>
+                <p className="text-xs mt-2 text-gray-500">Data is fetched from the last 6 months</p>
+              </div>
             )}
           </CardContent>
         </Card>
 
         {/* Expense Breakdown */}
-        <Card>
+        {/* <Card>
           <CardHeader>
             <CardTitle>Expense Categories</CardTitle>
             <CardDescription>Monthly expense breakdown</CardDescription>
@@ -384,7 +405,7 @@ const FinanceDashboard = () => {
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
-        </Card>
+        </Card> */}
       </div>
 
       {/* Bottom Row */}
@@ -518,7 +539,7 @@ const FinanceDashboard = () => {
       </div>
 
       {/* Financial Summary */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card>
           <CardHeader>
             <CardTitle>Cash Flow</CardTitle>
@@ -605,7 +626,7 @@ const FinanceDashboard = () => {
             </div>
           </CardContent>
         </Card>
-      </div>
+      </div> */}
     </div>
   );
 };

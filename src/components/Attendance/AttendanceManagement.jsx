@@ -7,7 +7,7 @@ import { Users, Clock, Timer, Search, Filter, CheckCircle, XCircle, Eye, Downloa
 import { useAuth } from '../../contexts/AuthContext';
 import { useData } from '../../contexts/DataContext';
 import { useEmployeeMode } from '../../hooks/useEmployeeMode';
-import { AttendanceAPI } from '../../lib/api';
+import { AttendanceAPI, EmployeesAPI } from '../../lib/api';
 import {
   BarChart,
   Bar,
@@ -36,8 +36,11 @@ const AttendanceManagement = () => {
     allAttendance,
     allAttendanceLoading,
     fetchAllAttendance,
-    employees,
   } = useData();
+
+  // Local state for employees (independent of context)
+  const [employees, setEmployees] = useState([]);
+  const [employeesLoading, setEmployeesLoading] = useState(false);
   const [weeklyData, setWeeklyData] = useState([]);
   const [weeklyLoading, setWeeklyLoading] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
@@ -397,6 +400,8 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
         fetchAdminList();
         // Load weekly overview from backend
         loadWeeklyData();
+        // Preload employees for attendance modal
+        loadEmployeesData();
       }
     }
   }, [user]);
@@ -1001,6 +1006,32 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
     setReportOpen(false);
   };
 
+  // Function to load employees data for attendance modal
+  const loadEmployeesData = async () => {
+    try {
+      setEmployeesLoading(true);
+      console.log('🔄 Loading employees for attendance modal...');
+      const response = await EmployeesAPI.list({ status: 'active' });
+      console.log('✅ Employees data loaded:', response.data);
+      
+      // Handle different response structures
+      const employeesData = response.data?.employees || response.data?.data || response.data || [];
+      setEmployees(employeesData);
+      console.log(`📊 Total employees available for attendance: ${employeesData.length}`);
+    } catch (error) {
+      console.error('❌ Failed to load employees data:', error);
+      console.error('🔍 Error details:', error.response?.data);
+      // Keep empty array on error
+      setEmployees([]);
+      notify({ 
+        type: 'error', 
+        message: 'Failed to load employees list. Please refresh the page.' 
+      });
+    } finally {
+      setEmployeesLoading(false);
+    }
+  };
+
   // Function to load weekly attendance data
   const loadWeeklyData = async () => {
     if (user?.role !== 'admin' && user?.role !== 'hr') {
@@ -1285,6 +1316,8 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
                 });
                 setAddAttendanceError('');
                 setShowAddAttendanceModal(true);
+                // Load employees when modal opens
+                loadEmployeesData();
               }}
             >
               <Plus className="h-4 w-4" />
@@ -2293,25 +2326,29 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
                     value={addAttendanceForm.employeeId}
                     onChange={(e) => handleAddAttendanceFormChange('employeeId', e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-white"
-                    disabled={isAddingAttendance}
+                    disabled={isAddingAttendance || employeesLoading}
                   >
-                    <option value="">Choose an employee...</option>
-                    {(employees || [])
+                    <option value="">
+                      {employeesLoading ? 'Loading employees...' : 'Choose an employee...'}
+                    </option>
+                    {!employeesLoading && (employees || [])
                       .filter(emp => {
-                        const isActive = emp?.status === 'active';
-                        // Filter by department (case-insensitive). Accept various structures
-                        const deptRaw = emp?.department || emp?.Employee?.department || emp?.Department?.name;
-                        const dept = String(deptRaw || '').toLowerCase();
-                        const inEngineering = dept === 'engineering' || dept === 'human resources' || dept==='finance';
-                        return isActive && inEngineering;
+                        // Only filter by active status - remove department restriction
+                        return emp?.status === 'active';
                       })
                       .map(employee => (
                         <option key={employee.id} value={employee.employeeId}>
-                          {employee.name} ({employee.employeeId}) - {employee.email}
+                          {employee.name} ({employee.employeeId}) - {employee.department || 'No Department'}
                         </option>
                       ))
                     }
                   </select>
+                  {employeesLoading && (
+                    <p className="text-sm text-gray-500 mt-1">Loading employee list...</p>
+                  )}
+                  {!employeesLoading && employees.length === 0 && (
+                    <p className="text-sm text-red-500 mt-1">No active employees found. Please check your connection and try again.</p>
+                  )}
                 </div>
 
                 {/* Date Picker */}
