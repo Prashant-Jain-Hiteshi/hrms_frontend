@@ -2,11 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
-import { Users, Clock, Timer, Search, Filter, CheckCircle, XCircle, Eye, Download, Calendar, Plus, User, Save, X, Play, Pause } from 'lucide-react';
+import { Users, Clock, Timer, Search, Filter, CheckCircle, XCircle, Eye, Download, Calendar, Plus, User, Save, X, Play, Pause, AlertCircle } from 'lucide-react';
  
 import { useAuth } from '../../contexts/AuthContext';
 import { useData } from '../../contexts/DataContext';
-import { AttendanceAPI } from '../../lib/api';
+import { useEmployeeMode } from '../../hooks/useEmployeeMode';
+import { AttendanceAPI, EmployeesAPI } from '../../lib/api';
 import {
   BarChart,
   Bar,
@@ -22,6 +23,7 @@ import {
 
 const AttendanceManagement = () => {
   const { user } = useAuth();
+  const { isEmployeeMode, effectiveRole } = useEmployeeMode();
   const {
     myAttendance,
     attendanceSummary,
@@ -34,8 +36,11 @@ const AttendanceManagement = () => {
     allAttendance,
     allAttendanceLoading,
     fetchAllAttendance,
-    employees,
   } = useData();
+
+  // Local state for employees (independent of context)
+  const [employees, setEmployees] = useState([]);
+  const [employeesLoading, setEmployeesLoading] = useState(false);
   const [weeklyData, setWeeklyData] = useState([]);
   const [weeklyLoading, setWeeklyLoading] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
@@ -66,6 +71,20 @@ const AttendanceManagement = () => {
   const [selectedDateDetails, setSelectedDateDetails] = useState(null);
   const [dateDetailsLoading, setDateDetailsLoading] = useState(false);
 
+  // Toast Notifications State
+  const [notifications, setNotifications] = useState([]);
+
+  // Toast notification helper
+  const notify = ({ type = 'info', message = '', timeout = 3000 }) => {
+    const id = `${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
+    setNotifications((prev) => [...prev, { id, type, message }]);
+    if (timeout > 0) {
+      setTimeout(() => {
+        setNotifications((prev) => prev.filter((n) => n.id !== id));
+      }, timeout);
+    }
+  };
+
   // Work Duration Timer State
   const [workDuration, setWorkDuration] = useState('00:00:00');
   const [totalWorkedTime, setTotalWorkedTime] = useState('00:00:00');
@@ -78,8 +97,9 @@ const AttendanceManagement = () => {
   
   // Month/Year selection for Monthly Calendar
   const init = new Date();
-  const [selectedMonth, setSelectedMonth] = useState(init.getMonth()); // 0-11
+  const [selectedMonth, setSelectedMonth] = useState(init.getMonth()); // 0-11 (September = 8)
   const [selectedYear, setSelectedYear] = useState(init.getFullYear());
+  
   
   // State for attendance summary data
   const [attendanceTotals, setAttendanceTotals] = useState({
@@ -132,7 +152,6 @@ const AttendanceManagement = () => {
   const startTimer = (checkInTime) => {
     try {
       const startTime = checkInTime || new Date().toISOString();
-      console.log('🔍 DEBUG - Starting timer with:', { checkInTime, startTime });
       
       setTimerStartTime(startTime);
       setIsTimerRunning(true);
@@ -148,7 +167,6 @@ const AttendanceManagement = () => {
           // Use the exact same logic as the table: formatSec(totalSecondsFromSessions())
           const currentSeconds = totalSecondsFromSessions();
           const formatted = formatSec(currentSeconds);
-          console.log('🔍 DEBUG - Timer update (using table logic):', { currentSeconds, formatted });
           setWorkDuration(formatted);
         } catch (error) {
           console.error('Error updating timer:', error);
@@ -171,10 +189,7 @@ const AttendanceManagement = () => {
     const completedTime = formatSec(finalSeconds);
     setTotalWorkedTime(completedTime);
     
-    console.log('🔍 DEBUG - Timer stopped (using table logic):', { 
-      finalSeconds, 
-      completedTime 
-    });
+  
   };
 
   const resumeTimer = (checkInTime) => {
@@ -187,9 +202,10 @@ const AttendanceManagement = () => {
     }
   };
 
-  // Fallback function to calculate totals from existing myAttendance data
-  const calculateTotalsFromExistingData = () => {
-    const map = new Map((myAttendance || []).map(r => [r.date, r]));
+  // Calculate totals directly from calendar API data
+  const calculateTotalsFromCalendarData = (apiData) => {
+    const pad2 = (n) => String(n).padStart(2, '0');
+    const map = new Map((apiData || []).map(r => [r.date, r]));
     const first = new Date(selectedYear, selectedMonth, 1);
     const last = new Date(selectedYear, selectedMonth + 1, 0);
     let present = 0, absent = 0, late = 0;
@@ -221,6 +237,11 @@ const AttendanceManagement = () => {
       totalWorkingDays,
       attendancePercentage
     });
+  };
+
+  // Fallback function to calculate totals from existing calendar data
+  const calculateTotalsFromExistingData = () => {
+    calculateTotalsFromCalendarData(calendarData);
   };
 
   // Effect to fetch totals when month/year changes
@@ -307,9 +328,8 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
 };
 
   const handleDeleteRecord = (recordId) => {
-    if (window.confirm('Are you sure you want to delete this attendance record?')) {
-      // Local-only deletion placeholder; backend deletion not implemented
-    }
+    console.log('Delete attendance record requested for ID:', recordId);
+    // Local-only deletion placeholder; backend deletion not implemented
   };
 
   // Handle date click to show attendance details
@@ -378,30 +398,10 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
       fetchAttendanceStatus();
       if (user.role === 'admin' || user.role === 'hr') {
         fetchAdminList();
-        // also fetch weekly overview from backend
-        (async () => {
-          try {
-            setWeeklyLoading(true);
-            const res = await AttendanceAPI.weekly();
-            const days = Array.isArray(res?.data?.days) ? res.data.days : [];
-            // Build names client-side from date to prevent server-timezone label drift
-            const toName = (iso) => {
-              try {
-                const [Y, M, D] = String(iso).split('-').map(Number);
-                const dd = new Date(Y, (M || 1) - 1, D || 1, 0, 0, 0, 0); // local date
-                return dd.toLocaleDateString('en-US', { weekday: 'short' });
-              } catch { return String(iso); }
-            };
-            const data = days
-              .map(d => ({ date: d.date, name: toName(d.date), present: d.present || 0, absent: d.absent || 0, late: d.late || 0 }))
-              .sort((a, b) => String(a.date).localeCompare(String(b.date)));
-            setWeeklyData(data);
-          } catch (e) {
-            setWeeklyData([]);
-          } finally {
-            setWeeklyLoading(false);
-          }
-        })();
+        // Load weekly overview from backend
+        loadWeeklyData();
+        // Preload employees for attendance modal
+        loadEmployeesData();
       }
     }
   }, [user]);
@@ -430,18 +430,12 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
       // Resume timer if there's an active session and timer is not already running
       if (hasActiveSession && attendanceStatus.sessionStartTime && !isTimerRunning) {
         const startTimestamp = attendanceStatus.sessionStartTimestamp || attendanceStatus.sessionStartTime;
-        console.log('🔍 DEBUG - Attempting to resume timer:', { 
-          hasActiveSession, 
-          sessionStartTime: attendanceStatus.sessionStartTime,
-          startTimestamp,
-          isTimerRunning 
-        });
+      
         if (startTimestamp) {
           resumeTimer(startTimestamp);
         }
       } else if (!hasActiveSession && isTimerRunning) {
         // Stop timer if no active session
-        console.log('🔍 DEBUG - Stopping timer (no active session)');
         stopTimer();
       } else if (!hasActiveSession && !isTimerRunning) {
         // Use the SAME logic as the table for completed time
@@ -451,10 +445,7 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
         setWorkDuration('00:00:00'); // Reset work duration
         setTimerStartTime(null);
         
-        console.log('🔍 DEBUG - Setting completed hours (table logic):', { 
-          currentSeconds, 
-          completedTime 
-        });
+       
       }
     }
   }, [attendanceStatus]);
@@ -467,10 +458,6 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
       const completedTime = formatSec(currentSeconds);
       setTotalWorkedTime(completedTime);
       
-      console.log('🔍 DEBUG - Syncing with table logic:', { 
-        currentSeconds, 
-        completedTime 
-      });
     }
   }, [myAttendance, isTimerRunning, activeSession, attendanceStatus]);
 
@@ -527,7 +514,7 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
     const filename = `attendance_report_${new Date().toISOString().split('T')[0]}.csv`;
     
     downloadCSV(csvContent, filename);
-    alert('Attendance report exported successfully!');
+    console.log('Attendance report exported successfully!');
   };
   
   const generateAttendanceCSV = () => {
@@ -590,33 +577,45 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
   // Separate state variables for Monthly Calendar data
   const [calendarData, setCalendarData] = useState([]);
   const [calendarLoading, setCalendarLoading] = useState(false);
+  // Avg hours (today) for admin/hr from backend
+  const [avgHoursToday, setAvgHoursToday] = useState(null);
+  const [avgHoursLoading, setAvgHoursLoading] = useState(false);
 
   const adminBackendDate = () => {
-    if (adminType === 'daily') return adminPicker; // yyyy-mm-dd
-    // if picker is like yyyy-mm (from <input type="month">), normalize to first day
-    if (/^\d{4}-\d{2}$/.test(adminPicker)) return `${adminPicker}-01`;
-    // else assume full date string; convert to first-of-month
-    try {
-      const d = new Date(adminPicker);
-      if (!isNaN(d.getTime())) return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10);
-    } catch {}
-    return new Date().toISOString().slice(0, 10);
+    if (adminType === 'daily') {
+      // For daily, ensure we have a valid date format
+      if (/^\d{4}-\d{2}-\d{2}$/.test(adminPicker)) {
+        return adminPicker;
+      }
+      // Fallback to today's date
+      return new Date().toISOString().slice(0, 10);
+    }
+    
+    // For monthly type
+    if (/^\d{4}-\d{2}$/.test(adminPicker)) {
+      // Month format (YYYY-MM) -> convert to first day of month
+      return `${adminPicker}-01`;
+    }
+    
+    // If we have a full date, extract the month and convert to first day
+    if (/^\d{4}-\d{2}-\d{2}$/.test(adminPicker)) {
+      return `${adminPicker.slice(0, 7)}-01`;
+    }
+    
+    // Fallback to current month's first day
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    return `${currentMonth}-01`;
   };
 
   // Dedicated API function for Employee Today's Attendance table ONLY
   const fetchEmployeeTableData = async () => {
     // Only for employees - admin/HR don't have this separate table UI
-    if (user?.role !== 'employee') {
+    if (effectiveRole !== 'employee') {
       return;
     }
 
     setTodayTableLoading(true);
     try {
-      console.log('🔍 DEBUG - Fetching Employee Today\'s Attendance table data with filters:', {
-        empType,
-        empPicker,
-        empStatus
-      });
 
       let params = {};
       
@@ -634,12 +633,10 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
         params = { from, to };
       }
       
-      console.log('🔍 DEBUG - API params for employee table:', params);
       
       // Use the same API call format as the calendar
       const response = await fetchMyAttendance(params);
       setTodayTableData(response || []);
-      console.log('🔍 DEBUG - Employee table data updated:', response?.length || 0, 'records');
       
     } catch (error) {
       console.error('Error fetching employee table data:', error);
@@ -667,17 +664,17 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
   const fetchCalendarData = async () => {
     setCalendarLoading(true);
     try {
-      if (user?.role === 'employee') {
+      if (effectiveRole === 'employee') {
         // For employees, fetch their own attendance data for the calendar
         const first = new Date(selectedYear, selectedMonth, 1);
         const last = new Date(selectedYear, selectedMonth + 1, 0);
         const from = first.toISOString().slice(0, 10);
         const to = last.toISOString().slice(0, 10);
-        
-        // Call API directly and store in separate calendar state
-        const response = await AttendanceAPI.getMyAttendance({ from, to });
-        setCalendarData(response || []);
-        console.log('🔍 DEBUG - Calendar data updated:', response?.length || 0, 'records');
+
+        // Correct API and response handling
+        const res = await AttendanceAPI.my({ from, to });
+        const rows = Array.isArray(res?.data) ? res.data : (Array.isArray(res?.data?.rows) ? res.data.rows : []);
+        setCalendarData(rows);
       } else {
         // For admin/HR, fetch all attendance data for the calendar
         const calendarDate = calendarType === 'monthly' ? `${calendarPicker}-01` : calendarPicker;
@@ -693,7 +690,6 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
         // Call API directly and store in separate calendar state
         const response = await AttendanceAPI.getAllAttendance(params);
         setCalendarData(response || []);
-        console.log('🔍 DEBUG - Calendar data updated:', response?.length || 0, 'records');
       }
     } catch (error) {
       console.error('Error fetching calendar data:', error);
@@ -705,19 +701,19 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
 
   // Separate useEffect for Employee Today's Attendance table ONLY
   useEffect(() => {
-    if (user?.role === 'employee') {
+    if (effectiveRole === 'employee') {
       fetchEmployeeTableData();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [empType, empPicker, empStatus, user]);
+  }, [empType, empPicker, empStatus, effectiveRole]);
 
-  // Keep original admin useEffect for admin/HR
+  // Keep original admin useEffect for admin/HR (only when NOT in employee mode)
   useEffect(() => {
-    if (user?.role === 'admin' || user?.role === 'hr') {
+    if ((user?.role === 'admin' || user?.role === 'hr') && !isEmployeeMode) {
       fetchAdminList();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adminType, adminPicker, adminStatus]);
+  }, [adminType, adminPicker, adminStatus, isEmployeeMode]);
 
   // Separate useEffect for calendar data fetching
   useEffect(() => {
@@ -725,7 +721,63 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
       fetchCalendarData();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [calendarType, calendarPicker, calendarStatus, selectedMonth, selectedYear]);
+  }, [calendarType, calendarPicker, calendarStatus, selectedMonth, selectedYear, user]);
+
+  // Admin/HR Avg Hours (today): ALWAYS compute from allAttendance for today
+  useEffect(() => {
+    const isAdminOrHr = user?.role === 'admin' || user?.role === 'hr';
+    if (!isAdminOrHr) {
+      setAvgHoursToday(null);
+      return;
+    }
+    let cancelled = false;
+    const computeAvgFromAll = () => {
+      try {
+        const rows = (allAttendance || [])
+          .filter(r => String(r?.date) === String(today))
+          .map(r => ({
+            status: r?.status,
+            checkIn: r?.checkIn,
+            checkOut: r?.checkOut,
+            totalHours: r?.hoursWorked,
+          }));
+        const presentRows = rows.filter((r) => {
+          const s = String(r?.status || '').toLowerCase();
+          return s === 'present' || s === 'late' || !!r?.checkIn;
+        });
+        const toNum = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+        const hmsToHours = (t) => {
+          if (!t || typeof t !== 'string' || !/^\d{1,2}:\d{2}(:\d{2})?$/.test(t)) return null;
+          const [hh, mm, ss = '0'] = t.split(':');
+          const h = Number(hh), m = Number(mm), s = Number(ss);
+          if ([h,m,s].some(x => Number.isNaN(x))) return null;
+          return h + m/60 + s/3600;
+        };
+        const deriveHours = (r) => {
+          const th = toNum(r.totalHours);
+          if (th > 0) return th;
+          const ci = hmsToHours(r.checkIn);
+          const co = hmsToHours(r.checkOut);
+          if (ci !== null && co !== null && co >= ci) return +(co - ci).toFixed(2);
+          return 0;
+        };
+        if (!cancelled) {
+          if (presentRows.length === 0) setAvgHoursToday(0);
+          else {
+            const sum = presentRows.reduce((acc, r) => acc + deriveHours(r), 0);
+            const avg = sum / presentRows.length;
+            setAvgHoursToday(avg);
+          }
+        }
+      } catch (err) {
+        if (!cancelled) setAvgHoursToday(null);
+      } finally {
+        if (!cancelled) setAvgHoursLoading(false);
+      }
+    };
+    computeAvgFromAll();
+    return () => { cancelled = true; };
+  }, [user, today, allAttendance]);
   const selfToday = (myAttendance || []).find(r => r.date === today);
   const toHoursDisplay = (hoursWorked, checkIn, checkOut) => {
     const pad2 = (n) => String(n).padStart(2, '0');
@@ -824,7 +876,7 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
     status: r.status || (r.checkIn ? 'present' : 'absent'),
     hours: toHoursDisplay(r.hoursWorked, r.checkIn, r.checkOut)
   });
-  const isEmployee = user?.role === 'employee';
+  const isEmployee = effectiveRole === 'employee';
   // Build employee list with employee filters applied
   const employeeRecords = (() => {
     // Use the dedicated employee table data instead of shared myAttendance
@@ -861,7 +913,15 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
   // Summary metrics: Present Today, Absent Today, Late Today (role-aware)
   const activeEmployees = (employees || []).filter(e => (e?.status || 'active') === 'active');
   const todayMy = (myAttendance || []).find(r => r.date === today);
-  const adminTodayPresent = (todayTableData || []).filter(r => r?.date === today && r?.checkIn);
+  // For Admin/HR, compute today's present list from the admin dataset (allAttendance),
+  // not the employee-only table (todayTableData). Treat explicit checkIn or status present/late as present.
+  const adminTodayPresent = (allAttendance || []).filter(r => {
+    const sameDay = String(r?.date) === String(today);
+    const hasCheckIn = !!r?.checkIn;
+    const status = String(r?.status || '').toLowerCase();
+    const statusPresent = status === 'present' || status === 'late';
+    return sameDay && (hasCheckIn || statusPresent);
+  });
   // Prefer backend weekly aggregated data for Admin/HR to keep charts and KPIs consistent
   const weeklyToday = (user?.role === 'admin' || user?.role === 'hr')
     ? (() => {
@@ -871,15 +931,42 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
         return (weeklyData || []).find(d => d.name === todayName) || null;
       })()
     : null;
-  const presentTodayCount = (user?.role === 'employee')
+  const presentTodayCount = (effectiveRole === 'employee')
     ? (todayMy?.checkIn ? 1 : 0)
     : (weeklyToday ? weeklyToday.present : new Set(adminTodayPresent.map(r => r.userId || r.employeeId || r.Employee?.id || r.id)).size);
-  const absentTodayCount = (user?.role === 'employee')
+  const absentTodayCount = (effectiveRole === 'employee')
     ? (presentTodayCount ? 0 : 1)
     : (weeklyToday ? weeklyToday.absent : Math.max(0, activeEmployees.length - presentTodayCount));
-  const lateTodayCount = (user?.role === 'employee')
+  const lateTodayCount = (effectiveRole === 'employee')
     ? (todayMy?.status === 'late' ? 1 : 0)
-    : (weeklyToday ? weeklyToday.late : (todayTableData || []).filter(r => r?.date === today && r?.status === 'late').length);
+    : (() => {
+        // Compute late arrivals for Admin/HR from admin dataset for today
+        const LATE_THRESHOLD = { h: 9, m: 15, s: 0 };
+        const toSec = (t) => {
+          if (!t || t === '-') return null;
+          const parts = String(t).split(':').map(Number);
+          const [hh = 0, mm = 0, ss = 0] = parts;
+          if ([hh, mm, ss].some((x) => Number.isNaN(x))) return null;
+          return hh * 3600 + mm * 60 + ss;
+        };
+        const lateThresholdSec = LATE_THRESHOLD.h * 3600 + LATE_THRESHOLD.m * 60 + LATE_THRESHOLD.s;
+        const todays = (allAttendance || []).filter(r => String(r?.date) === String(today));
+        const lateUserIds = new Set();
+        for (const r of todays) {
+          const status = String(r?.status || '').toLowerCase();
+          const id = r?.userId || r?.employeeId || r?.Employee?.id || r?.id;
+          if (!id) continue;
+          if (status === 'late') {
+            lateUserIds.add(String(id));
+            continue;
+          }
+          const checkInSec = toSec(r?.checkIn);
+          if (checkInSec !== null && checkInSec > lateThresholdSec) {
+            lateUserIds.add(String(id));
+          }
+        }
+        return lateUserIds.size;
+      })();
 
   // Weekly charts now use backend-provided data in weeklyData
 
@@ -917,6 +1004,150 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
     const ext = exportFormat === 'pdf' ? 'pdf' : 'csv';
     downloadBlob(blob, `attendance_${reportType}_${label}_${stamp}.${ext}`);
     setReportOpen(false);
+  };
+
+  // Function to load employees data for attendance modal
+  const loadEmployeesData = async () => {
+    try {
+      setEmployeesLoading(true);
+      console.log('🔄 Loading employees for attendance modal...');
+      const response = await EmployeesAPI.list({ status: 'active' });
+      console.log('✅ Employees data loaded:', response.data);
+      
+      // Handle different response structures
+      const employeesData = response.data?.employees || response.data?.data || response.data || [];
+      setEmployees(employeesData);
+      console.log(`📊 Total employees available for attendance: ${employeesData.length}`);
+    } catch (error) {
+      console.error('❌ Failed to load employees data:', error);
+      console.error('🔍 Error details:', error.response?.data);
+      // Keep empty array on error
+      setEmployees([]);
+      notify({ 
+        type: 'error', 
+        message: 'Failed to load employees list. Please refresh the page.' 
+      });
+    } finally {
+      setEmployeesLoading(false);
+    }
+  };
+
+  // Function to load weekly attendance data
+  const loadWeeklyData = async () => {
+    if (user?.role !== 'admin' && user?.role !== 'hr') {
+      return; // Only admin/HR need weekly data
+    }
+    
+    try {
+      setWeeklyLoading(true);
+      const res = await AttendanceAPI.weekly();
+      const days = Array.isArray(res?.data?.days) ? res.data.days : [];
+      
+      // Build names client-side from date to prevent server-timezone label drift
+      const toName = (iso) => {
+        try {
+          const [Y, M, D] = String(iso).split('-').map(Number);
+          const dd = new Date(Y, (M || 1) - 1, D || 1, 0, 0, 0, 0); // local date
+          return dd.toLocaleDateString('en-US', { weekday: 'short' });
+        } catch { return String(iso); }
+      };
+      
+      const data = days
+        .map(d => ({ date: d.date, name: toName(d.date), present: d.present || 0, absent: d.absent || 0, late: d.late || 0 }))
+        .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+      
+      setWeeklyData(data);
+    } catch (e) {
+      console.error('Failed to load weekly data:', e);
+      setWeeklyData([]);
+    } finally {
+      setWeeklyLoading(false);
+    }
+  };
+
+  // 🚀 Comprehensive refresh function for attendance data
+  // This function refreshes ONLY attendance-related data, not other modules
+  const refreshAttendanceData = async () => {
+    try {
+      console.log('🔄 Refreshing attendance data for current page...');
+      
+      // Create array of refresh promises to run in parallel
+      const refreshPromises = [];
+      
+      // 1. Refresh all attendance data (for admin/HR view)
+      if (fetchAllAttendance) {
+        refreshPromises.push(
+          fetchAllAttendance().catch(err => {
+            console.error('Failed to refresh all attendance:', err);
+          })
+        );
+      }
+      
+      // 2. Refresh my attendance data (for employee view)
+      if (fetchMyAttendance) {
+        refreshPromises.push(
+          fetchMyAttendance().catch(err => {
+            console.error('Failed to refresh my attendance:', err);
+          })
+        );
+      }
+      
+      // 3. Refresh attendance status for current user
+      if (fetchAttendanceStatus) {
+        refreshPromises.push(
+          fetchAttendanceStatus().catch(err => {
+            console.error('Failed to refresh attendance status:', err);
+          })
+        );
+      }
+      
+      // 4. Refresh weekly attendance data
+      refreshPromises.push(
+        loadWeeklyData().catch(err => {
+          console.error('Failed to refresh weekly data:', err);
+        })
+      );
+      
+      // 5. Refresh attendance totals/statistics (Present Today, Absent Today, etc.)
+      if (fetchAttendanceTotals) {
+        refreshPromises.push(
+          fetchAttendanceTotals().catch(err => {
+            console.error('Failed to refresh attendance totals:', err);
+          })
+        );
+      }
+      
+      // 6. Refresh calendar data (monthly view)
+      if (fetchCalendarData) {
+        refreshPromises.push(
+          fetchCalendarData().catch(err => {
+            console.error('Failed to refresh calendar data:', err);
+          })
+        );
+      }
+      
+      // 7. Refresh today's attendance stats
+      const today = new Date().toISOString().split('T')[0];
+      if (selectedDate === today) {
+        // Only refresh stats if we're viewing today's data
+        refreshPromises.push(
+          Promise.resolve().then(async () => {
+            // This will trigger a re-render of stats cards
+            setSelectedDate(today);
+          }).catch(err => {
+            console.error('Failed to refresh today stats:', err);
+          })
+        );
+      }
+      
+      // 8. Execute all refreshes in parallel for better performance
+      await Promise.all(refreshPromises);
+      
+      console.log('✅ Attendance data refreshed successfully');
+      
+    } catch (error) {
+      console.error('❌ Error refreshing attendance data:', error);
+    }
   };
 
   // Add Employee Attendance Handler Functions
@@ -997,13 +1228,16 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
       // Call API to add attendance (we'll need to add this endpoint)
       await AttendanceAPI.addEmployeeAttendance(attendanceData);
 
-      // Refresh attendance data
-      if (fetchAllAttendance) {
-        await fetchAllAttendance();
-      }
-      if (fetchMyAttendance) {
-        await fetchMyAttendance();
-      }
+      // 🚀 Refresh ALL attendance-related data for current page
+      await refreshAttendanceData();
+
+      // Show success notification after refresh
+      const selectedEmployee = employees.find(emp => emp.id === parseInt(employeeId));
+      const employeeName = selectedEmployee?.name || 'Employee';
+      notify({ 
+        type: 'success', 
+        message: `Attendance added successfully for ${employeeName} on ${date}! Page data updated.` 
+      });
 
       // Reset form and close modal
       setAddAttendanceForm({
@@ -1015,14 +1249,17 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
       });
       setShowAddAttendanceModal(false);
       
-      alert('Employee attendance added successfully!');
-      
     } catch (error) {
       console.error('Error adding employee attendance:', error);
-      setAddAttendanceError(
-        error.response?.data?.message || 
-        'Failed to add employee attendance. Please try again.'
-      );
+      const errorMessage = error.response?.data?.message || 'Failed to add employee attendance. Please try again.';
+      
+      // Show error notification
+      notify({ 
+        type: 'error', 
+        message: errorMessage 
+      });
+      
+      setAddAttendanceError(errorMessage);
     } finally {
       setIsAddingAttendance(false);
     }
@@ -1030,6 +1267,33 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
 
   return (
     <div className="space-y-6">
+      {/* Toast Notifications */}
+      <div className="fixed top-4 right-4 z-50 space-y-3">
+        {notifications.map((n) => (
+          <div
+            key={n.id}
+            className={`flex items-start gap-3 px-4 py-3 rounded-lg shadow-lg border text-sm transition-all duration-200 ${
+              n.type === 'success'
+                ? 'bg-green-50 border-green-200 text-green-800 dark:bg-green-900/20 dark:text-green-300 dark:border-green-800'
+                : n.type === 'error'
+                ? 'bg-red-50 border-red-200 text-red-800 dark:bg-red-900/20 dark:text-red-300 dark:border-red-800'
+                : 'bg-blue-50 border-blue-200 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300 dark:border-blue-800'
+            }`}
+          >
+            <div className="mt-0.5">
+              {n.type === 'success' ? <CheckCircle className="h-4 w-4" /> : n.type === 'error' ? <AlertCircle className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </div>
+            <div className="flex-1">{n.message}</div>
+            <button
+              className="text-xs opacity-70 hover:opacity-100"
+              onClick={() => setNotifications((prev) => prev.filter((x) => x.id !== n.id))}
+            >
+              Dismiss
+            </button>
+          </div>
+        ))}
+      </div>
+      
       {/* Header */}
       <div className="flex justify-between items-center">
         <div>
@@ -1037,8 +1301,8 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
           <p className="text-gray-600 dark:text-gray-400">Track and manage employee attendance</p>
         </div>
         <div className="flex space-x-3">
-          {/* Add Employee Attendance Button - Only for HR and Admin */}
-          {(user?.role === 'admin' || user?.role === 'hr') && (
+          {/* Add Employee Attendance Button - Only for HR and Admin (not in employee mode) */}
+          {(user?.role === 'admin' || user?.role === 'hr') && !isEmployeeMode && (
             <Button 
               variant="outline" 
               className="flex items-center space-x-2 bg-green-50 hover:bg-green-100 text-green-700 border-green-200" 
@@ -1052,50 +1316,56 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
                 });
                 setAddAttendanceError('');
                 setShowAddAttendanceModal(true);
+                // Load employees when modal opens
+                loadEmployeesData();
               }}
             >
               <Plus className="h-4 w-4" />
               <span>Add Employee Attendance</span>
             </Button>
           )}
-          <Button variant="outline" className="flex items-center space-x-2" onClick={handleExportAttendance}>
-            <Download className="h-4 w-4" />
-            <span>Export</span>
-          </Button>
-          <Button
-            variant="default"
-            className="flex items-center space-x-2"
-            onClick={() => {
-              // Prefill defaults based on current Admin view
-              try {
-                if (user?.role === 'admin' || user?.role === 'hr') {
-                  if (adminType === 'daily') {
-                    setReportType('daily');
-                    const d = (adminPicker && adminPicker.length >= 10) ? adminPicker.slice(0,10) : new Date().toISOString().slice(0,10);
-                    setReportDate(d);
+          {(user?.role === 'admin' || user?.role === 'hr') && !isEmployeeMode && (
+            <Button variant="outline" className="flex items-center space-x-2" onClick={handleExportAttendance}>
+              <Download className="h-4 w-4" />
+              <span>Export</span>
+            </Button>
+          )}
+          {(user?.role === 'admin' || user?.role === 'hr') && !isEmployeeMode && (
+            <Button
+              variant="default"
+              className="flex items-center space-x-2"
+              onClick={() => {
+                // Prefill defaults based on current Admin view
+                try {
+                  if (user?.role === 'admin' || user?.role === 'hr') {
+                    if (adminType === 'daily') {
+                      setReportType('daily');
+                      const d = (adminPicker && adminPicker.length >= 10) ? adminPicker.slice(0,10) : new Date().toISOString().slice(0,10);
+                      setReportDate(d);
+                    } else {
+                      setReportType('monthly');
+                      const m = (adminPicker && adminPicker.length >= 7) ? adminPicker.slice(0,7) : new Date().toISOString().slice(0,7);
+                      setReportMonth(m);
+                    }
                   } else {
-                    setReportType('monthly');
-                    const m = (adminPicker && adminPicker.length >= 7) ? adminPicker.slice(0,7) : new Date().toISOString().slice(0,7);
-                    setReportMonth(m);
+                    // Employees: default to daily today
+                    setReportType('daily');
+                    setReportDate(new Date().toISOString().slice(0,10));
                   }
-                } else {
-                  // Employees: default to daily today
-                  setReportType('daily');
-                  setReportDate(new Date().toISOString().slice(0,10));
-                }
-              } catch {}
-              setExportFormat('excel');
-              setReportOpen(true);
-            }}
-          >
-            <Calendar className="h-4 w-4" />
-            <span>Generate Report</span>
-          </Button>
+                } catch {}
+                setExportFormat('excel');
+                setReportOpen(true);
+              }}
+            >
+              <Calendar className="h-4 w-4" />
+              <span>Generate Report</span>
+            </Button>
+          )}
         </div>
       </div>
 
       {/* Employee Self-Service Check-in/out */}
-      {user?.role === 'employee' && (
+      {effectiveRole === 'employee' && (
         <Card>
           <CardHeader>
             <CardTitle>Quick Check-in/out</CardTitle>
@@ -1140,7 +1410,7 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
       )}
 
       {/* Work Duration Timer - Only show for employees */}
-      {user?.role === 'employee' && (
+      {effectiveRole === 'employee' && (
         <Card className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border-blue-200 dark:border-blue-800">
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
@@ -1179,13 +1449,13 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
                 </div>
                 {timerStartTime && (
                   <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                    Started: {(() => {
+                    {/* Started: {(() => {
                       try {
                         return new Date(timerStartTime).toLocaleTimeString();
                       } catch (error) {
                         return 'Invalid time';
                       }
-                    })()}
+                    })()} */}
                   </p>
                 )}
               </div>
@@ -1214,7 +1484,7 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-red-600">{absentTodayCount}</div>
-            <p className="text-xs text-muted-foreground">Active employees: {user?.role === 'employee' ? 1 : activeEmployees.length}</p>
+            <p className="text-xs text-muted-foreground">Active employees: {effectiveRole === 'employee' ? 1 : activeEmployees.length}</p>
           </CardContent>
         </Card>
 
@@ -1235,14 +1505,24 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
             <Clock className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-blue-600">{myAttendance?.length ? (Math.round((myAttendance.reduce((acc, r) => acc + (Number(r.hoursWorked) || 0), 0) / myAttendance.length) * 10) / 10) : '-'}</div>
+            <div className="text-2xl font-bold text-blue-600">
+              {(user?.role === 'admin' || user?.role === 'hr')
+                ? (avgHoursLoading
+                    ? '...'
+                    : (avgHoursToday === null
+                        ? '-'
+                        : Math.round(avgHoursToday * 100) / 100))
+                : (myAttendance?.length
+                    ? (Math.round((myAttendance.reduce((acc, r) => acc + (Number(r.hoursWorked) || 0), 0) / myAttendance.length) * 10) / 10)
+                    : '-')}
+            </div>
             <p className="text-xs text-muted-foreground">Hours per day</p>
           </CardContent>
         </Card>
       </div>
 
       {/* Charts: HR/Admin overview (reuse Admin Dashboard design) */}
-      {(user?.role === 'admin' || user?.role === 'hr') && (
+      {(user?.role === 'admin' || user?.role === 'hr') && !isEmployeeMode && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Weekly Attendance */}
           <Card>
@@ -1315,18 +1595,30 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
               />
             </div>
             {/* Admin filters */}
-            {user?.role !== 'employee' && (
+            {effectiveRole !== 'employee' && (
               <div className="flex items-center gap-3 flex-nowrap">
                 <div className="flex items-center gap-2">
                   <label className="text-sm">Type:</label>
                   <button
                     className={`px-2 py-1 text-sm rounded border ${adminType === 'daily' ? 'bg-primary text-white' : 'bg-transparent'}`}
-                    onClick={() => setAdminType('daily')}
+                    onClick={() => {
+                      setAdminType('daily');
+                      // When switching to daily, ensure we have a full date
+                      if (!/^\d{4}-\d{2}-\d{2}$/.test(adminPicker)) {
+                        const currentDate = new Date().toISOString().slice(0, 10);
+                        setAdminPicker(currentDate);
+                      }
+                    }}
                     type="button"
                   >Daily</button>
                   <button
                     className={`px-2 py-1 text-sm rounded border ${adminType === 'monthly' ? 'bg-primary text-white' : 'bg-transparent'}`}
-                    onClick={() => setAdminType('monthly')}
+                    onClick={() => {
+                      setAdminType('monthly');
+                      // When switching to monthly, convert current date to month format
+                      const currentMonth = new Date().toISOString().slice(0, 7);
+                      setAdminPicker(currentMonth);
+                    }}
                     type="button"
                   >Monthly</button>
                 </div>
@@ -1383,7 +1675,7 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
               </div>
             )}
             {/* Employee filters */}
-            {user?.role === 'employee' && (
+            {effectiveRole === 'employee' && (
               <div className="flex items-center gap-3 flex-nowrap">
                 <div className="flex items-center gap-2">
                   <label className="text-sm">Type:</label>
@@ -1461,7 +1753,7 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
                 </tr>
               </thead>
               <tbody>
-                {(user?.role !== 'employee' && allAttendanceLoading) ? (
+                {(effectiveRole !== 'employee' && allAttendanceLoading) ? (
                   <tr>
                     <td className="py-6 px-4 text-center text-sm text-gray-500 dark:text-gray-400" colSpan={isEmployee ? 7 : 6}>
                       Loading attendance...
@@ -1513,7 +1805,7 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
         </CardContent>
       </Card>
 
-      {user?.role === 'employee' && (
+      {effectiveRole === 'employee' && (
         <>
           {/* Monthly Calendar View */}
           <Card>
@@ -1614,7 +1906,7 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
                 const daysArray = [];
                 for (let i = 0; i < startPad; i++) daysArray.push(null);
                 for (let d = 1; d <= totalDays; d++) daysArray.push(d);
-                const map = new Map((myAttendance || []).map(r => [r.date, r]));
+                const map = new Map((calendarData || []).map(r => [r.date, r]));
                 return (
                   <div className="grid grid-cols-7 gap-2">
                     {daysArray.map((day, idx) => {
@@ -1624,7 +1916,8 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
                       const key = toKey(curr);
                       const rec = map.get(key);
                       const status = (rec?.status || '').toLowerCase();
-                      const color = status === 'present' ? 'bg-green-500' : status === 'late' ? 'bg-yellow-500' : status === 'absent' ? 'bg-red-500' : '';
+                      // Only show dots for 'present' and 'late'
+                      const color = status === 'present' ? 'bg-green-500' : status === 'late' ? 'bg-yellow-500' : '';
                       const isToday = key === toKey(new Date());
                       // Compute hours text from available fields -> normalize to HH:MM:SS
                       const minutesFrom = (n) => {
@@ -1667,7 +1960,9 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
                         >
                           <div className="text-sm font-medium">{day}</div>
                           <div className="flex justify-center mt-1 h-2">
-                            {status && (<span className={`w-2 h-2 rounded-full ${color}`}></span>)}
+                            {(status === 'present' || status === 'late') && (
+                              <span className={`w-2 h-2 rounded-full ${color}`}></span>
+                            )}
                           </div>
                         </div>
                       );
@@ -1850,14 +2145,14 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
                   <p className="text-gray-900 dark:text-white">Office - Main Building</p>
                 </div>
               </div>
-              <div>
+              {/* <div>
                 <label className="text-sm font-medium text-gray-600 dark:text-gray-400">Notes</label>
                 <div className="mt-2 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
                   <p className="text-gray-900 dark:text-white">
-                    {selectedRecord.status === 'late' ? 'Arrived late due to traffic' : 'Regular attendance'}
+                    {selectedRecord.status === 'late' ? '' : 'Regular attendance'}
                   </p>
                 </div>
-              </div>
+              </div> */}
             </div>
             
             <div className="flex justify-end space-x-3 mt-6">
@@ -1926,7 +2221,7 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
               <div>
                 <label className="block text-sm font-medium mb-1">Export Format</label>
                 <select
-                  className="border rounded px-2 py-1 text-sm bg-white dark:bg-gray-900"
+                  className="border rounded px-2 pr-8 py-1 text-sm bg-white dark:bg-gray-900"
                   value={exportFormat}
                   onChange={(e) => setExportFormat(e.target.value)}
                 >
@@ -2031,18 +2326,29 @@ const SessionRow = ({ index, session, durationLabel, canEdit, onSave }) => {
                     value={addAttendanceForm.employeeId}
                     onChange={(e) => handleAddAttendanceFormChange('employeeId', e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:text-white"
-                    disabled={isAddingAttendance}
+                    disabled={isAddingAttendance || employeesLoading}
                   >
-                    <option value="">Choose an employee...</option>
-                    {(employees || [])
-                      .filter(emp => emp?.status === 'active')
+                    <option value="">
+                      {employeesLoading ? 'Loading employees...' : 'Choose an employee...'}
+                    </option>
+                    {!employeesLoading && (employees || [])
+                      .filter(emp => {
+                        // Only filter by active status - remove department restriction
+                        return emp?.status === 'active';
+                      })
                       .map(employee => (
                         <option key={employee.id} value={employee.employeeId}>
-                          {employee.name} ({employee.employeeId}) - {employee.email}
+                          {employee.name} ({employee.employeeId}) - {employee.department || 'No Department'}
                         </option>
                       ))
                     }
                   </select>
+                  {employeesLoading && (
+                    <p className="text-sm text-gray-500 mt-1">Loading employee list...</p>
+                  )}
+                  {!employeesLoading && employees.length === 0 && (
+                    <p className="text-sm text-red-500 mt-1">No active employees found. Please check your connection and try again.</p>
+                  )}
                 </div>
 
                 {/* Date Picker */}

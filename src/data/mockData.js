@@ -2,96 +2,13 @@ import { format, subDays, addDays } from 'date-fns';
 
 // Mock employees data
 export const MOCK_EMPLOYEES = [
-  {
-    id: 1,
-    employeeId: 'EMP001',
-    name: 'Admin User',
-    email: 'admin@hiteshi.com',
-    phone: '+91 9876543210',
-    department: 'Administration',
-    designation: 'System Administrator',
-    role: 'admin',
-    joiningDate: '2020-01-15',
-    salary: 80000,
-    status: 'active',
-    manager: null,
-    avatar: null,
-    address: '123 Admin Street, Delhi',
-    emergencyContact: '+91 9876543211'
-  },
-  {
-    id: 2,
-    employeeId: 'EMP002',
-    name: 'HR Manager',
-    email: 'hr@hiteshi.com',
-    phone: '+91 9876543212',
-    department: 'Human Resources',
-    designation: 'HR Manager',
-    role: 'hr',
-    joiningDate: '2020-03-10',
-    salary: 75000,
-    status: 'active',
-    manager: 1,
-    avatar: null,
-    address: '456 HR Colony, Mumbai',
-    emergencyContact: '+91 9876543213'
-  },
-  {
-    id: 3,
-    employeeId: 'EMP003',
-    name: 'Shubham Kumar',
-    email: 'shubham@hiteshi.com',
-    phone: '+91 9876543214',
-    department: 'Engineering',
-    designation: 'Software Developer',
-    role: 'employee',
-    joiningDate: '2021-06-01',
-    salary: 65000,
-    status: 'active',
-    manager: 5,
-    avatar: null,
-    address: '789 Tech Park, Bangalore',
-    emergencyContact: '+91 9876543215'
-  },
-  {
-    id: 4,
-    employeeId: 'EMP004',
-    name: 'Finance Manager',
-    email: 'finance@hiteshi.com',
-    phone: '+91 9876543216',
-    department: 'Finance',
-    designation: 'Finance Manager',
-    role: 'finance',
-    joiningDate: '2020-02-20',
-    salary: 70000,
-    status: 'active',
-    manager: 1,
-    avatar: null,
-    address: '321 Finance Street, Chennai',
-    emergencyContact: '+91 9876543217'
-  },
-  {
-    id: 5,
-    employeeId: 'EMP005',
-    name: 'Tech Lead',
-    email: 'techlead@hiteshi.com',
-    phone: '+91 9876543218',
-    department: 'Engineering',
-    designation: 'Technical Lead',
-    role: 'employee',
-    joiningDate: '2019-08-15',
-    salary: 85000,
-    status: 'active',
-    manager: 1,
-    avatar: null,
-    address: '654 Innovation Hub, Hyderabad',
-    emergencyContact: '+91 9876543219'
-  }
+ 
+  
 ];
 
 // Mock departments
 export const MOCK_DEPARTMENTS = [
-  { id: 1, name: 'Administration', headId: 1, employeeCount: 1 },
+  // { id: 1, name: 'Administration', headId: 1, employeeCount: 1 },
   { id: 2, name: 'Human Resources', headId: 2, employeeCount: 1 },
   { id: 3, name: 'Engineering', headId: 5, employeeCount: 2 },
   { id: 4, name: 'Finance', headId: 4, employeeCount: 1 }
@@ -233,24 +150,24 @@ export const MOCK_EXPENSE_REQUESTS = [
 
 // Mock announcements
 export const MOCK_ANNOUNCEMENTS = [
-  {
-    id: 1,
-    title: 'New Office Opening',
-    content: 'We are excited to announce the opening of our new office in Pune!',
-    type: 'info',
-    publishedDate: format(subDays(new Date(), 2), 'yyyy-MM-dd'),
-    publishedBy: 2,
-    priority: 'high'
-  },
-  {
-    id: 2,
-    title: 'Holiday Notice',
-    content: 'Office will remain closed on Independence Day (August 15th).',
-    type: 'notice',
-    publishedDate: format(subDays(new Date(), 5), 'yyyy-MM-dd'),
-    publishedBy: 2,
-    priority: 'medium'
-  }
+  // {
+  //   id: 1,
+  //   title: 'New Office Opening',
+  //   content: 'We are excited to announce the opening of our new office in Pune!',
+  //   type: 'info',
+  //   publishedDate: format(subDays(new Date(), 2), 'yyyy-MM-dd'),
+  //   publishedBy: 2,
+  //   priority: 'high'
+  // },
+  // {
+  //   id: 2,
+  //   title: 'Holiday Notice',
+  //   content: 'Office will remain closed on Independence Day (August 15th).',
+  //   type: 'notice',
+  //   publishedDate: format(subDays(new Date(), 5), 'yyyy-MM-dd'),
+  //   publishedBy: 2,
+  //   priority: 'medium'
+  // }
 ];
 
 // Dashboard stats

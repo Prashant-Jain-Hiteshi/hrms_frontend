@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/Card';
 import { 
@@ -7,36 +7,133 @@ import {
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
 import { getDashboardStats, MOCK_LEAVE_REQUESTS, MOCK_JOB_OPENINGS } from '../../data/mockData';
-import { useData } from '../../contexts/DataContext';
+import { RecruitmentAPI, EmployeesAPI } from '../../lib/api';
+import { LeaveAPI } from '../../lib/leaveApi';
 
 const HRDashboard = () => {
   const navigate = useNavigate();
   const stats = getDashboardStats('hr');
-  const { employees } = useData();
+
+  // State for employees data
+  const [employees, setEmployees] = useState([]);
+  const [employeesLoading, setEmployeesLoading] = useState(true);
   const totalActiveEmployees = Array.isArray(employees)
     ? employees.filter(e => (e.status || 'active') === 'active').length
     : 0;
 
-  const recruitmentData = [
-    { name: 'Jan', applications: 45, hired: 8 },
-    { name: 'Feb', applications: 52, hired: 12 },
-    { name: 'Mar', applications: 38, hired: 6 },
-    { name: 'Apr', applications: 61, hired: 15 },
-    { name: 'May', applications: 49, hired: 9 },
-    { name: 'Jun', applications: 67, hired: 18 },
-  ];
+  // State for recruitment data
+  const [recruitmentStats, setRecruitmentStats] = useState({
+    upcomingInterviews: 0,
+    newApplications: 0,
+    todaysInterviews: [],
+    recruitmentTrends: []
+  });
+  const [loading, setLoading] = useState(true);
 
-  const leaveStatusData = [
-    { name: 'Approved', value: 85, color: '#10b981' },
-    { name: 'Pending', value: 12, color: '#f59e0b' },
-    { name: 'Rejected', value: 3, color: '#ef4444' },
-  ];
+  // State for leave statistics
+  const [leaveStats, setLeaveStats] = useState({
+    total: 0,
+    pending: 0,
+    approved: 0,
+    rejected: 0
+  });
+  const [leaveLoading, setLeaveLoading] = useState(true);
 
-  const upcomingInterviews = [
-    { candidate: 'John Smith', position: 'Senior Developer', time: '10:00 AM', date: 'Today' },
-    { candidate: 'Sarah Johnson', position: 'HR Executive', time: '2:00 PM', date: 'Today' },
-    { candidate: 'Mike Wilson', position: 'UI Designer', time: '11:00 AM', date: 'Tomorrow' },
-  ];
+  // Load recruitment data
+  const loadRecruitmentData = async () => {
+    try {
+      setLoading(true);
+      console.log('🔄 Loading HR dashboard data...');
+      const data = await RecruitmentAPI.dashboard.getHRDashboardStats();
+      console.log('✅ HR dashboard data loaded:', data);
+      console.log('📊 Today\'s interviews:', data.todaysInterviews);
+      setRecruitmentStats(data);
+    } catch (error) {
+      console.error('❌ Failed to load recruitment data:', error);
+      console.error('🔍 Error details:', error.response?.data);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Load leave statistics
+  const loadLeaveStatistics = async () => {
+    try {
+      setLeaveLoading(true);
+      console.log('🔄 Loading leave statistics...');
+      const response = await LeaveAPI.admin.getOverallStats();
+      console.log('✅ Leave statistics loaded:', response.data);
+      setLeaveStats(response.data);
+    } catch (error) {
+      console.error('❌ Failed to load leave statistics:', error);
+      console.error('🔍 Error details:', error.response?.data);
+      // Keep default values on error
+    } finally {
+      setLeaveLoading(false);
+    }
+  };
+
+  // Load employees data
+  const loadEmployeesData = async () => {
+    try {
+      setEmployeesLoading(true);
+      console.log('🔄 Loading employees data...');
+      const response = await EmployeesAPI.list({ status: 'active' });
+      console.log('✅ Employees data loaded:', response.data);
+      
+      // Handle different response structures
+      const employeesData = response.data?.employees || response.data?.data || response.data || [];
+      setEmployees(employeesData);
+      console.log(`📊 Total active employees: ${employeesData.length}`);
+    } catch (error) {
+      console.error('❌ Failed to load employees data:', error);
+      console.error('🔍 Error details:', error.response?.data);
+      // Keep empty array on error
+      setEmployees([]);
+    } finally {
+      setEmployeesLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadRecruitmentData();
+    loadLeaveStatistics();
+    loadEmployeesData();
+  }, []);
+
+  // Calculate dynamic leave status data with percentages
+  const leaveStatusData = React.useMemo(() => {
+    const { total, pending, approved, rejected } = leaveStats;
+    
+    if (total === 0) {
+      return [
+        { name: 'Approved', value: 0, count: 0, color: '#10b981' },
+        { name: 'Pending', value: 0, count: 0, color: '#f59e0b' },
+        { name: 'Rejected', value: 0, count: 0, color: '#ef4444' },
+      ];
+    }
+
+    return [
+      { 
+        name: 'Approved', 
+        value: Math.round((approved / total) * 100), 
+        count: approved, 
+        color: '#10b981' 
+      },
+      { 
+        name: 'Pending', 
+        value: Math.round((pending / total) * 100), 
+        count: pending, 
+        color: '#f59e0b' 
+      },
+      { 
+        name: 'Rejected', 
+        value: Math.round((rejected / total) * 100), 
+        count: rejected, 
+        color: '#ef4444' 
+      },
+    ];
+  }, [leaveStats]);
 
   const topPerformers = [
     { name: 'Alice Cooper', department: 'Engineering', rating: 4.8 },
@@ -60,7 +157,7 @@ const HRDashboard = () => {
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{totalActiveEmployees}</div>
+            <div className="text-2xl font-bold">{employeesLoading ? '...' : totalActiveEmployees}</div>
             <p className="text-xs text-muted-foreground">Active workforce</p>
           </CardContent>
         </Card>
@@ -71,7 +168,7 @@ const HRDashboard = () => {
             <UserPlus className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{stats.upcomingInterviews}</div>
+            <div className="text-2xl font-bold">{loading ? '...' : recruitmentStats.upcomingInterviews}</div>
             <p className="text-xs text-muted-foreground">This week</p>
           </CardContent>
         </Card>
@@ -82,7 +179,7 @@ const HRDashboard = () => {
             <Calendar className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{stats.pendingLeaves}</div>
+            <div className="text-2xl font-bold">{leaveLoading ? '...' : leaveStats.pending}</div>
             <p className="text-xs text-muted-foreground">Awaiting approval</p>
           </CardContent>
         </Card>
@@ -93,7 +190,7 @@ const HRDashboard = () => {
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{stats.newApplications}</div>
+            <div className="text-2xl font-bold">{loading ? '...' : recruitmentStats.newApplications}</div>
             <p className="text-xs text-muted-foreground">This month</p>
           </CardContent>
         </Card>
@@ -109,11 +206,17 @@ const HRDashboard = () => {
           </CardHeader>
           <CardContent>
             <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={recruitmentData}>
+              <BarChart data={recruitmentStats.recruitmentTrends || []}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" />
+                <XAxis dataKey="month" />
                 <YAxis />
-                <Tooltip />
+                <Tooltip 
+                  formatter={(value, name) => [
+                    `${value} ${name.toLowerCase()}`, 
+                    name === 'Applications' ? 'Applications Received' : 'Candidates Hired'
+                  ]}
+                  labelFormatter={(label) => `${label} 2024`}
+                />
                 <Bar dataKey="applications" fill="#3b82f6" name="Applications" />
                 <Bar dataKey="hired" fill="#10b981" name="Hired" />
               </BarChart>
@@ -125,31 +228,56 @@ const HRDashboard = () => {
         <Card>
           <CardHeader>
             <CardTitle>Leave Requests Status</CardTitle>
-            <CardDescription>Current month overview</CardDescription>
+            <CardDescription>
+              {leaveLoading ? 'Loading...' : `Total: ${leaveStats.total} requests`}
+            </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
-              {leaveStatusData.map((status, index) => (
-                <div key={index} className="flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-4 h-4 rounded-full" style={{ backgroundColor: status.color }}></div>
-                    <span className="text-sm font-medium">{status.name}</span>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <div className="w-32 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                      <div 
-                        className="h-2 rounded-full" 
-                        style={{ 
-                          backgroundColor: status.color, 
-                          width: `${status.value}%` 
-                        }}
-                      ></div>
+            {leaveLoading ? (
+              <div className="space-y-4">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-4 h-4 rounded-full bg-gray-200 dark:bg-gray-700 animate-pulse"></div>
+                      <div className="w-16 h-4 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
                     </div>
-                    <span className="text-sm font-bold">{status.value}%</span>
+                    <div className="flex items-center space-x-2">
+                      <div className="w-32 bg-gray-200 dark:bg-gray-700 rounded-full h-2 animate-pulse"></div>
+                      <div className="w-8 h-4 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : leaveStats.total === 0 ? (
+              <div className="text-center text-muted-foreground py-8">
+                <Calendar className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>No leave requests found</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {leaveStatusData.map((status, index) => (
+                  <div key={index} className="flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-4 h-4 rounded-full" style={{ backgroundColor: status.color }}></div>
+                      <span className="text-sm font-medium">{status.name}</span>
+                      <span className="text-xs text-muted-foreground">({status.count})</span>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <div className="w-32 bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                        <div 
+                          className="h-2 rounded-full transition-all duration-300" 
+                          style={{ 
+                            backgroundColor: status.color, 
+                            width: `${status.value}%` 
+                          }}
+                        ></div>
+                      </div>
+                      <span className="text-sm font-bold">{status.value}%</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -164,27 +292,29 @@ const HRDashboard = () => {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {upcomingInterviews.map((interview, index) => (
-                <div key={index} className="flex items-center space-x-3 p-3 rounded-lg bg-gray-50 dark:bg-gray-800">
-                  <div className="bg-primary/10 rounded-full p-2">
-                    <Clock className="h-4 w-4 text-primary" />
+              {loading ? (
+                <div className="text-center text-muted-foreground">Loading...</div>
+              ) : recruitmentStats.todaysInterviews.length === 0 ? (
+                <div className="text-center text-muted-foreground">No interviews today</div>
+              ) : (
+                recruitmentStats.todaysInterviews.map((interview, index) => (
+                  <div key={index} className="flex items-center space-x-3 p-3 rounded-lg bg-gray-50 dark:bg-gray-800">
+                    <div className="bg-primary/10 rounded-full p-2">
+                      <Clock className="h-4 w-4 text-primary" />
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm font-medium">{interview.candidate}</p>
+                      <p className="text-xs text-muted-foreground">{interview.position}</p>
+                    </div>
                   </div>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium">{interview.candidate}</p>
-                    <p className="text-xs text-muted-foreground">{interview.position}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-xs font-medium">{interview.time}</p>
-                    <p className="text-xs text-muted-foreground">{interview.date}</p>
-                  </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </CardContent>
         </Card>
 
         {/* Top Performers */}
-        <Card>
+        {/* <Card>
           <CardHeader>
             <CardTitle>Top Performers</CardTitle>
             <CardDescription>This quarter's stars</CardDescription>
@@ -208,7 +338,7 @@ const HRDashboard = () => {
               ))}
             </div>
           </CardContent>
-        </Card>
+        </Card> */}
 
         {/* Quick Actions */}
         <Card>
@@ -252,7 +382,7 @@ const HRDashboard = () => {
       </div>
 
       {/* Recent Activities */}
-      <Card>
+      {/* <Card>
         <CardHeader>
           <CardTitle>Recent Activities</CardTitle>
           <CardDescription>Latest HR activities</CardDescription>
@@ -282,7 +412,7 @@ const HRDashboard = () => {
             </div>
           </div>
         </CardContent>
-      </Card>
+      </Card> */}
     </div>
   );
 };

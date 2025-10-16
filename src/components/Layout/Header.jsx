@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
+import { useNotifications } from '../../socket/NotificationContext';
+import { useNotificationAuth } from '../../socket/useNotificationAuth';
 import { Button } from '../ui/Button';
 import NotificationsPage from '../Notifications/NotificationsPage';
+import { formatDistanceToNow } from 'date-fns';
 import { 
   Menu, Bell, Search, Sun, Moon, User, ChevronDown,
   Settings, LogOut
@@ -11,32 +14,98 @@ import {
 const Header = ({ onMenuClick }) => {
   const { user, logout } = useAuth();
   const { isDark, toggleTheme } = useTheme();
+  
+  // Initialize notification authentication
+  useNotificationAuth();
+  
+  // Get real notification data
+  const {
+    notifications: realNotifications,
+    unreadCount,
+    markAsRead: markNotificationAsRead,
+    markAllAsRead: markAllNotificationsAsRead,
+    loadNotifications
+  } = useNotifications();
+
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showNotificationsPage, setShowNotificationsPage] = useState(false);
-  const [notifications, setNotifications] = useState([
-    { id: 1, title: 'Leave request approved', message: 'Your leave request for Dec 25-26 has been approved', time: '2 hours ago', unread: true, type: 'success' },
-    { id: 2, title: 'New payslip generated', message: 'Your payslip for November 2024 is now available', time: '1 day ago', unread: true, type: 'info' },
-    { id: 3, title: 'Performance review due', message: 'Please complete your quarterly performance review', time: '3 days ago', unread: false, type: 'warning' },
-    { id: 4, title: 'Team meeting scheduled', message: 'Weekly team sync meeting tomorrow at 10 AM', time: '1 week ago', unread: false, type: 'info' }
-  ]);
 
-  const unreadCount = notifications.filter(n => n.unread).length;
+  // Load notifications when component mounts
+  useEffect(() => {
+    if (user) {
+      loadNotifications();
+    }
+  }, [user, loadNotifications]);
 
-  const markAsRead = (notificationId) => {
-    setNotifications(prev => 
-      prev.map(notification => 
-        notification.id === notificationId 
-          ? { ...notification, unread: false }
-          : notification
-      )
-    );
+  // Helper function to get notification type for UI
+  const getNotificationType = (notification) => {
+    switch (notification.type) {
+      case 'leave_approved':
+        return 'success';
+      case 'leave_rejected':
+        return 'error';
+      case 'leave_pending':
+        return 'warning';
+      case 'compensatory_leave_assigned':
+        return 'success';
+      case 'payroll_hr_approved':
+        return 'success';
+      case 'payroll_finance_approved':
+        return 'info';
+      case 'salary_transfer_initiated':
+        return 'warning';
+      case 'salary_transfer_completed':
+        return 'success';
+      case 'salary_transfer_failed':
+        return 'error';
+      case 'payslip_generated':
+      case 'salary_processed':
+        return 'info';
+      default:
+        return 'info';
+    }
   };
 
-  const markAllAsRead = () => {
-    setNotifications(prev => 
-      prev.map(notification => ({ ...notification, unread: false }))
-    );
+  // Convert real notifications to header format (show only recent 4)
+  const notifications = realNotifications.slice(0, 4).map(notification => {
+    // Safely handle date formatting
+    let timeText = 'Just now';
+    try {
+      if (notification.createdAt) {
+        const date = new Date(notification.createdAt);
+        if (!isNaN(date.getTime())) {
+          timeText = formatDistanceToNow(date, { addSuffix: true });
+        }
+      }
+    } catch (error) {
+      console.warn('Invalid date in notification:', notification.createdAt);
+    }
+
+    return {
+      id: notification.id,
+      title: notification.title,
+      message: notification.message,
+      time: timeText,
+      unread: !notification.isRead,
+      type: getNotificationType(notification)
+    };
+  });
+
+  const markAsRead = async (notificationId) => {
+    try {
+      await markNotificationAsRead(notificationId);
+    } catch (error) {
+      console.error('Failed to mark notification as read:', error);
+    }
+  };
+
+  const markAllAsRead = async () => {
+    try {
+      await markAllNotificationsAsRead();
+    } catch (error) {
+      console.error('Failed to mark all notifications as read:', error);
+    }
   };
 
   return (
@@ -53,7 +122,7 @@ const Header = ({ onMenuClick }) => {
             <Menu className="h-5 w-5" />
           </Button>
           
-          <div className="hidden md:flex items-center space-x-4">
+          {/* <div className="hidden md:flex items-center space-x-4">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-white/60" />
               <input
@@ -62,7 +131,7 @@ const Header = ({ onMenuClick }) => {
                 className="pl-10 pr-4 py-2 w-80 rounded-lg border border-white/30 bg-white/20 text-white placeholder-white/60 text-sm focus:outline-none focus:ring-2 focus:ring-white/50 focus:border-white/50"
               />
             </div>
-          </div>
+          </div> */}
         </div>
 
         {/* Right side */}

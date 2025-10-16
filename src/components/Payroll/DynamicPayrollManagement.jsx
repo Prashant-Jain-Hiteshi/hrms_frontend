@@ -44,7 +44,7 @@ const DynamicPayrollManagement = () => {
 
   const calculatePayrollPreview = async () => {
     if (!selectedEmployees.length || !periodStart || !periodEnd) {
-      alert('Please select employees and date range');
+      console.warn('Please select employees and date range');
       return;
     }
 
@@ -67,7 +67,6 @@ const DynamicPayrollManagement = () => {
       setActiveTab('preview');
     } catch (error) {
       console.error('Error calculating payroll:', error);
-      alert('Error calculating payroll');
     } finally {
       setLoading(false);
     }
@@ -92,13 +91,12 @@ const DynamicPayrollManagement = () => {
         })
       });
       const data = await response.json();
-      alert('Payroll processed successfully!');
+      console.log('Payroll processed successfully!');
       setPayrollPreview([]);
       setSelectedEmployees([]);
       setActiveTab('calculate');
     } catch (error) {
       console.error('Error processing payroll:', error);
-      alert('Error processing payroll');
     } finally {
       setLoading(false);
     }

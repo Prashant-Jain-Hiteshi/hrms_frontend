@@ -22,11 +22,7 @@ const LeaveTypes = () => {
   const [formData, setFormData] = useState({
     name: '',
     numberOfLeaves: '',
-    description: '',
-    requiresApproval: true,
-    carryForward: false,
-    encashment: false,
-    eligibility: 'all'
+    description: ''
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -44,11 +40,7 @@ const LeaveTypes = () => {
     setFormData({
       name: '',
       numberOfLeaves: '',
-      description: '',
-      requiresApproval: true,
-      carryForward: false,
-      encashment: false,
-      eligibility: 'all'
+      description: ''
     });
     setShowAddModal(true);
   };
@@ -58,25 +50,20 @@ const LeaveTypes = () => {
     setFormData({
       name: leaveType.name,
       numberOfLeaves: leaveType.numberOfLeaves.toString(),
-      description: leaveType.description || '',
-      requiresApproval: leaveType.requiresApproval !== false,
-      carryForward: leaveType.carryForward || false,
-      encashment: leaveType.encashment || false,
-      eligibility: leaveType.eligibility || 'all'
+      description: leaveType.description || ''
     });
     setShowEditModal(true);
   };
 
   const handleDelete = async (id) => {
-    if (window.confirm('Are you sure you want to delete this leave type?')) {
-      setLoading(true);
-      try {
-        await deleteLeaveType(id);
-      } catch (error) {
-        setError(error.response?.data?.message || error.message || 'Failed to delete leave type');
-      } finally {
-        setLoading(false);
-      }
+    console.log('Delete leave type requested for ID:', id);
+    setLoading(true);
+    try {
+      await deleteLeaveType(id);
+    } catch (error) {
+      setError(error.response?.data?.message || error.message || 'Failed to delete leave type');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -90,10 +77,10 @@ const LeaveTypes = () => {
         name: formData.name,
         numberOfLeaves: parseInt(formData.numberOfLeaves) || 0,
         description: formData.description,
-        requiresApproval: formData.requiresApproval,
-        carryForward: formData.carryForward,
-        encashment: formData.encashment,
-        eligibility: formData.eligibility
+        requiresApproval: true,
+        carryForward: false,
+        encashment: false,
+        eligibility: 'all'
       };
 
       if (showEditModal && selectedLeaveType) {
@@ -263,7 +250,7 @@ const LeaveTypes = () => {
                             size="sm"
                             variant="outline"
                             onClick={() => handleEdit(leaveType)}
-                            className="bg-purple-600 hover:bg-purple-700 text-white border-purple-600 flex items-center space-x-1"
+                            className="bg-blue-600 hover:bg-blue-700 text-white border-blue-600 flex items-center space-x-1"
                           >
                             <Eye className="h-3 w-3" />
                             <span>View/Edit</span>
@@ -389,64 +376,12 @@ const LeaveTypes = () => {
                 />
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">
-                    Eligibility
-                  </label>
-                  <select
-                    value={formData.eligibility}
-                    onChange={(e) => setFormData({...formData, eligibility: e.target.value})}
-                    className="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                  >
-                    <option value="all">All Employees</option>
-                    <option value="permanent">Permanent Only</option>
-                    <option value="contract">Contract Only</option>
-                    <option value="senior">Senior Level</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="flex items-center">
-                  <input
-                    type="checkbox"
-                    id="requiresApproval"
-                    checked={formData.requiresApproval}
-                    onChange={(e) => setFormData({...formData, requiresApproval: e.target.checked})}
-                    className="mr-2"
-                  />
-                  <label htmlFor="requiresApproval" className="text-sm text-gray-700 dark:text-gray-300">
-                    Requires Approval
-                  </label>
-                </div>
-                
-                <div className="flex items-center">
-                  <input
-                    type="checkbox"
-                    id="carryForward"
-                    checked={formData.carryForward}
-                    onChange={(e) => setFormData({...formData, carryForward: e.target.checked})}
-                    className="mr-2"
-                  />
-                  <label htmlFor="carryForward" className="text-sm text-gray-700 dark:text-gray-300">
-                    Carry Forward Allowed
-                  </label>
-                </div>
-                
-                <div className="flex items-center">
-                  <input
-                    type="checkbox"
-                    id="encashment"
-                    checked={formData.encashment}
-                    onChange={(e) => setFormData({...formData, encashment: e.target.checked})}
-                    className="mr-2"
-                  />
-                  <label htmlFor="encashment" className="text-sm text-gray-700 dark:text-gray-300">
-                    Encashment Allowed
-                  </label>
-                </div>
-              </div>
+              {/* Default settings: All Employees, Requires Approval: true, Carry Forward: false, Encashment: false */}
+              {/* <div className="bg-gray-50 dark:bg-gray-700 p-3 rounded-lg">
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  <strong>Default Settings:</strong> Available to all employees, requires approval, no carry forward or encashment allowed.
+                </p>
+              </div> */}
 
               <div className="flex justify-end space-x-3 pt-4">
                 <Button type="button" variant="outline" onClick={closeModal} disabled={loading}>

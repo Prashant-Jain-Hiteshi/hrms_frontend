@@ -82,6 +82,62 @@
     @apply text-current;
   }
 
+  /* Custom focus utility class */
+  .focus-clean:focus {
+    outline: none !important;
+    box-shadow: none !important;
+    border: 0 !important;
+  }
+
+  /* Global fix for ALL input fields - removes black ring and adds blue border */
+  input:focus,
+  textarea:focus,
+  .input-field:focus {
+    outline: none !important;
+    box-shadow: none !important;
+    border-color: #3b82f6 !important; /* blue-500 */
+    transition: border-color 200ms ease-in-out;
+  }
+
+  /* Hover effect for ALL input fields */
+  input:hover,
+  textarea:hover,
+  .input-field:hover {
+    border-color: #3b82f6 !important; /* blue-500 */
+    transition: border-color 200ms ease-in-out;
+  }
+
+  /* Global fix for all buttons - removes black ring and adds proper focus/hover */
+  button:focus,
+  .btn:focus,
+  [role="button"]:focus {
+    outline: none !important;
+    box-shadow: none !important;
+  }
+
+  /* Button hover and focus effects */
+  button[data-variant="outline"]:hover,
+  button[data-variant="outline"]:focus,
+  .btn-outline:hover,
+  .btn-outline:focus {
+    border-color: #3b82f6 !important; /* blue-500 */
+    transition: border-color 200ms ease-in-out;
+  }
+
+  button[data-variant="default"]:hover,
+  button[data-variant="default"]:focus,
+  .btn-primary:hover,
+  .btn-primary:focus {
+    background-color: #2563eb !important; /* blue-600 */
+    transition: background-color 200ms ease-in-out;
+  }
+
+  /* Generic button focus fix */
+  button:focus-visible {
+    outline: 2px solid #3b82f6 !important;
+    outline-offset: 2px;
+  }
+
   /* Logo Animations */
   @keyframes slide-in {
     0% {

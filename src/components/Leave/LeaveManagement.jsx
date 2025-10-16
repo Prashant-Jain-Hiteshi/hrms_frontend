@@ -9,8 +9,9 @@ import {
 import { PieChart, Pie, Cell, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
 import { useAuth } from '../../contexts/AuthContext';
 import { useData } from '../../contexts/DataContext';
+import { useEmployeeMode } from '../../hooks/useEmployeeMode';
 import { LeaveAPI } from '../../lib/leaveApi';
-import { AttendanceAPI } from '../../lib/api';
+import { AttendanceAPI, LeaveAPI as MainLeaveAPI } from '../../lib/api';
 import { CalendarAPI } from '../../lib/api';
 import { compensatoryLeaveAPI } from '../../lib/compensatoryLeaveApi';
 import LeaveTypes from './LeaveTypes';
@@ -18,7 +19,8 @@ import LeaveTypesChart from './LeaveTypesChart';
 
 const LeaveManagement = () => {
   const { user } = useAuth();
-  const { leaveRequests, addLeaveRequest, approveLeave, rejectLeave, cancelLeave, employees, leaveTypes, fetchLeaveBalance, myAttendance, monthlyCreditTotal, monthlyCreditAnnual } = useData();
+  const { isEmployeeMode, effectiveRole } = useEmployeeMode();
+  const { leaveRequests, addLeaveRequest, approveLeave, rejectLeave, cancelLeave, employees, leaveTypes, fetchLeaveBalance, fetchEmployees, myAttendance, monthlyCreditTotal, monthlyCreditAnnual } = useData();
   const [selectedTab, setSelectedTab] = useState('overview');
   const [searchTerm, setSearchTerm] = useState('');
   const [showApplyForm, setShowApplyForm] = useState(false);
@@ -42,6 +44,11 @@ const LeaveManagement = () => {
   const [editHoliday, setEditHoliday] = useState({ date: '', name: '', type: 'public' });
   const [showCalendarModal, setShowCalendarModal] = useState(false);
 
+  // Monthly trends state
+  const [monthlyTrendsData, setMonthlyTrendsData] = useState([]);
+  const [monthlyTrendsLoading, setMonthlyTrendsLoading] = useState(false);
+  const [monthlyTrendsError, setMonthlyTrendsError] = useState(null);
+
   // Compensatory Leave state (HR only)
   const [compensatoryLeaves, setCompensatoryLeaves] = useState([]);
   const [compensatorySummary, setCompensatorySummary] = useState({
@@ -52,6 +59,50 @@ const LeaveManagement = () => {
     totalUsed: 0
   });
   const [loadingCompensatory, setLoadingCompensatory] = useState(false);
+
+  // 🚀 Fetch monthly leave trends from API
+  const fetchMonthlyTrends = async () => {
+    try {
+      setMonthlyTrendsLoading(true);
+      setMonthlyTrendsError(null);
+      
+      console.log('🔄 Fetching monthly leave trends...');
+      const response = await MainLeaveAPI.monthlyTrends();
+      
+      if (response.data?.success && response.data?.data) {
+        const trendsData = response.data.data.map(item => ({
+          month: item.month,
+          year: item.year,
+          leaves: item.leaves,
+          // For now, we'll show total leaves as "approved" 
+          // Later we can enhance backend to return status breakdown
+          approved: item.leaves,
+          pending: 0,
+          rejected: 0
+        }));
+        
+        setMonthlyTrendsData(trendsData);
+        console.log('✅ Monthly trends loaded:', trendsData);
+      } else {
+        throw new Error('Invalid response format');
+      }
+    } catch (error) {
+      console.error('❌ Error fetching monthly trends:', error);
+      setMonthlyTrendsError(error.message || 'Failed to load monthly trends');
+      
+      // Fallback to mock data
+      setMonthlyTrendsData([
+        { month: 'May', approved: 0, pending: 0, rejected: 0 },
+        { month: 'Jun', approved: 0, pending: 0, rejected: 0 },
+        { month: 'Jul', approved: 0, pending: 0, rejected: 0 },
+        { month: 'Aug', approved: 0, pending: 0, rejected: 0 },
+        { month: 'Sep', approved: 0, pending: 0, rejected: 0 },
+        { month: 'Oct', approved: 0, pending: 0, rejected: 0 }
+      ]);
+    } finally {
+      setMonthlyTrendsLoading(false);
+    }
+  };
   const [showCompensatoryForm, setShowCompensatoryForm] = useState(false);
   const [editingCompensatory, setEditingCompensatory] = useState(null);
   const [compensatoryForm, setCompensatoryForm] = useState({
@@ -61,15 +112,15 @@ const LeaveManagement = () => {
     expiryDate: ''
   });
 
-  // Role and tabs
-  const role = String(user?.role || '').toLowerCase();
-  const isHR = role === 'hr';
-  const isAdmin = role === 'admin';
+  // Role and tabs (use effectiveRole for employee mode)
+  const role = String(effectiveRole || '').toLowerCase();
+  const isHR = role === 'hr' && !isEmployeeMode; // HR in management mode
+  const isAdmin = role === 'admin' && !isEmployeeMode; // Admin in management mode
   const tabs = (() => {
+    if (effectiveRole === 'employee') return ['overview', 'requests', 'mentions', 'leavebalance', 'policies'];
     if (isHR) return ['overview', 'mentions', 'compensatory', 'policies'];
-    if (role === 'employee') return ['overview', 'requests', 'mentions', 'leavebalance', 'policies'];
-    // Admin and other roles: no Leave Balance
-    return ['overview', 'requests', 'mentions', 'policies', 'calendar'];
+    // Admin: no Requests tab and no Leave Balance
+    return ['overview', 'mentions', 'policies', 'calendar'];
   })();
 
   // simple toast helper
@@ -100,6 +151,8 @@ const LeaveManagement = () => {
         };
         
         await compensatoryLeaveAPI.update(editingCompensatory.id, updateData);
+        // Success toast for update
+        notify({ type: 'success', message: 'Compensatory leave updated successfully' });
       } else {
         // Add new compensatory leave
         const createData = {
@@ -110,6 +163,8 @@ const LeaveManagement = () => {
         };
         
         await compensatoryLeaveAPI.create(createData);
+        // Success toast for create
+        notify({ type: 'success', message: 'Compensatory leave assigned successfully' });
       }
       
       // Refresh data
@@ -121,7 +176,8 @@ const LeaveManagement = () => {
       setEditingCompensatory(null);
     } catch (error) {
       console.error('Error saving compensatory leave:', error);
-      alert('Error saving compensatory leave. Please try again.');
+      // Error toast
+      notify({ type: 'error', message: 'Failed to save compensatory leave. Please try again.' });
     } finally {
       setLoadingCompensatory(false);
     }
@@ -140,18 +196,17 @@ const LeaveManagement = () => {
   };
 
   const handleDeleteCompensatory = async (id) => {
-    if (window.confirm('Are you sure you want to delete this compensatory leave?')) {
-      setLoadingCompensatory(true);
-      try {
-        await compensatoryLeaveAPI.delete(id);
-        await fetchCompensatoryData();
-        notify({ type: 'success', message: 'Compensatory leave deleted successfully' });
-      } catch (error) {
-        console.error('Error deleting compensatory leave:', error);
-        notify({ type: 'error', message: 'Error deleting compensatory leave. Please try again.' });
-      } finally {
-        setLoadingCompensatory(false);
-      }
+    console.log('Delete compensatory leave requested for ID:', id);
+    setLoadingCompensatory(true);
+    try {
+      await compensatoryLeaveAPI.delete(id);
+      await fetchCompensatoryData();
+      notify({ type: 'success', message: 'Compensatory leave deleted successfully' });
+    } catch (error) {
+      console.error('Error deleting compensatory leave:', error);
+      notify({ type: 'error', message: 'Error deleting compensatory leave. Please try again.' });
+    } finally {
+      setLoadingCompensatory(false);
     }
   };
 
@@ -170,20 +225,25 @@ const LeaveManagement = () => {
     const startWeekday = first.getDay(); // 0..6
     const totalDays = last.getDate();
 
+    // Helper function to format date as YYYY-MM-DD without timezone issues
+    const formatDateLocal = (year, month, day) => {
+      return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    };
+
     // previous month padding
     const prevLast = new Date(y, m - 1, 0);
     const prevDays = prevLast.getDate();
     const leading = Array.from({ length: startWeekday }, (_, i) => {
       const d = prevDays - startWeekday + 1 + i;
       const dt = new Date(y, m - 2, d);
-      return { iso: dt.toISOString().slice(0, 10), day: d, inMonth: false, weekday: dt.getDay() };
+      return { iso: formatDateLocal(y, m - 2, d), day: d, inMonth: false, weekday: dt.getDay() };
     });
 
     // current month
     const current = Array.from({ length: totalDays }, (_, i) => {
       const d = i + 1;
       const dt = new Date(y, m - 1, d);
-      return { iso: dt.toISOString().slice(0, 10), day: d, inMonth: true, weekday: dt.getDay() };
+      return { iso: formatDateLocal(y, m - 1, d), day: d, inMonth: true, weekday: dt.getDay() };
     });
 
     // trailing padding to fill 6 weeks grid
@@ -193,7 +253,7 @@ const LeaveManagement = () => {
     const trailing = Array.from({ length: trailingCount }, (_, i) => {
       const d = i + 1;
       const dt = new Date(y, m, d);
-      return { iso: dt.toISOString().slice(0, 10), day: d, inMonth: false, weekday: dt.getDay() };
+      return { iso: formatDateLocal(y, m, d), day: d, inMonth: false, weekday: dt.getDay() };
     });
 
     return [...leading, ...current, ...trailing];
@@ -350,10 +410,39 @@ const LeaveManagement = () => {
 
   // Prevent non-employees (HR/Admin) from accessing Leave Balance tab
   useEffect(() => {
-    if (selectedTab === 'leavebalance' && role !== 'employee') {
+    if (selectedTab === 'leavebalance' && effectiveRole !== 'employee') {
       setSelectedTab('overview');
     }
-  }, [selectedTab, role]);
+  }, [selectedTab, effectiveRole]);
+
+  // 🚀 Load monthly trends when overview tab is selected (Admin/HR only)
+  useEffect(() => {
+    if (selectedTab === 'overview' && (isAdmin || isHR)) {
+      fetchMonthlyTrends();
+    }
+  }, [selectedTab, isAdmin, isHR]);
+
+  // 🚀 Debug employees data for leave form
+  useEffect(() => {
+    console.log('🔍 DEBUG - Employees data for leave form:', {
+      employeesCount: employees?.length || 0,
+      employees: employees?.slice(0, 3), // Show first 3 for debugging
+      showApplyForm
+    });
+  }, [employees, showApplyForm]);
+
+  // 🚀 Ensure employees are loaded when apply form is opened
+  useEffect(() => {
+    if (showApplyForm && (!employees || employees.length === 0)) {
+      console.log('🔄 Leave form opened but no employees loaded, fetching...');
+      // Try to fetch employees from DataContext
+      if (typeof fetchEmployees === 'function') {
+        fetchEmployees().catch(err => {
+          console.error('❌ Failed to fetch employees for leave form:', err);
+        });
+      }
+    }
+  }, [showApplyForm, employees]);
 
   // Helpers
   const formatDateTime = (dateStr, timeStr) => {
@@ -685,6 +774,19 @@ const LeaveManagement = () => {
     return Object.keys(errors).length === 0;
   };
 
+  const resetForm = () => {
+    setLeaveForm({
+      leaveType: '',
+      startDate: '',
+      endDate: '',
+      startTime: '09:30',
+      endTime: '19:00',
+      reason: '',
+      toEmployees: [],
+      ccEmployees: []
+    });
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     
@@ -705,11 +807,17 @@ const LeaveManagement = () => {
       };
 
       await addLeaveRequest(leaveData);
+      
+      // Show success notification
+      notify({ type: 'success', message: 'Leave request submitted successfully! Your request is now pending status.' });
+      
       setShowApplyForm(false);
       resetForm();
       setFormErrors({});
     } catch (error) {
       console.error('Leave submission error:', error);
+      // Show error notification
+      notify({ type: 'error', message: 'Failed to submit leave request. Please try again.' });
     }
   };
 
@@ -779,7 +887,7 @@ const LeaveManagement = () => {
     }
   }, [user?.employeeId, fetchLeaveBalance]);
 
-  const filteredLeaveRequests = user?.role === 'employee' 
+  const filteredLeaveRequests = effectiveRole === 'employee' 
     ? leaveRequests.filter(request => 
         request.employeeId === user.employeeId || 
         request.employeeId === user.id || 
@@ -820,13 +928,14 @@ const LeaveManagement = () => {
     { name: 'Emergency Leave', value: leaveTypeCounts['Emergency Leave'] || 0, color: '#6366f1' }
   ].filter(item => item.value > 0);
 
-  const monthlyLeaveData = [
-    { month: 'Jan', approved: 12, pending: 3, rejected: 1 },
-    { month: 'Feb', approved: 15, pending: 5, rejected: 2 },
-    { month: 'Mar', approved: 18, pending: 2, rejected: 1 },
-    { month: 'Apr', approved: 20, pending: 4, rejected: 3 },
-    { month: 'May', approved: 25, pending: 6, rejected: 2 },
-    { month: 'Jun', approved: 22, pending: 3, rejected: 1 }
+  // 🚀 Use real API data or fallback to current month + 5 previous months
+  const monthlyLeaveData = monthlyTrendsData.length > 0 ? monthlyTrendsData : [
+    { month: 'May', approved: 0, pending: 0, rejected: 0 },
+    { month: 'Jun', approved: 0, pending: 0, rejected: 0 },
+    { month: 'Jul', approved: 0, pending: 0, rejected: 0 },
+    { month: 'Aug', approved: 0, pending: 0, rejected: 0 },
+    { month: 'Sep', approved: 0, pending: 0, rejected: 0 },
+    { month: 'Oct', approved: 0, pending: 0, rejected: 0 }
   ];
 
   // =====================
@@ -1133,6 +1242,62 @@ const LeaveManagement = () => {
 
   const ledgerRows = buildLedger();
 
+  // Save monthly leave records to database when employee checks Leave Balance
+  const saveMonthlyLeaveRecords = async (records) => {
+    try {
+      console.log('🔍 DEBUG - Raw records from buildLedger:', records);
+      
+      // Clean the data before sending (convert '-' and NaN to 0)
+      const cleanedRecords = records.map(record => ({
+        ...record,
+        opening: typeof record.opening === 'number' && !isNaN(record.opening) ? record.opening : 0,
+        monthlyCredit: typeof record.monthlyCredit === 'number' && !isNaN(record.monthlyCredit) ? record.monthlyCredit : 0,
+        extraCredit: typeof record.extraCredit === 'number' && !isNaN(record.extraCredit) ? record.extraCredit : 0,
+        closing: typeof record.closing === 'number' && !isNaN(record.closing) ? record.closing : 0,
+        deducted: typeof record.deducted === 'number' && !isNaN(record.deducted) ? record.deducted : 0,
+        lwp: typeof record.lwp === 'number' && !isNaN(record.lwp) ? record.lwp : 0,
+        present: typeof record.present === 'number' && !isNaN(record.present) ? record.present : 0,
+        absent: typeof record.absent === 'number' && !isNaN(record.absent) ? record.absent : 0,
+        effPresent: typeof record.effPresent === 'number' && !isNaN(record.effPresent) ? record.effPresent : 0,
+        effAbsent: typeof record.effAbsent === 'number' && !isNaN(record.effAbsent) ? record.effAbsent : 0,
+        paidDays: typeof record.paidDays === 'number' && !isNaN(record.paidDays) ? record.paidDays : 0,
+      }));
+      
+      console.log('🔍 DEBUG - Cleaned records for backend:', cleanedRecords);
+      
+      const { data } = await LeaveAPI.saveMonthlyRecords(cleanedRecords);
+      console.log('✅ Monthly leave records saved successfully:', data);
+      
+      // Show success notification
+      addNotification('success', `Saved ${data.recordCount} monthly leave records`);
+    } catch (error) {
+      console.error('❌ Error saving monthly leave records:', error);
+      addNotification('error', 'Error saving leave balance data');
+    }
+  };
+
+  // Auto-save monthly records ONLY when Leave Balance tab is selected
+  React.useEffect(() => {
+    console.log('🔍 DEBUG - useEffect triggered with:', {
+      selectedTab,
+      ledgerRowsLength: ledgerRows?.length || 0,
+      userRole: user?.role,
+      shouldSave: selectedTab === 'leavebalance' && ledgerRows && ledgerRows.length > 0 && user?.role === 'employee'
+    });
+    
+    if (selectedTab === 'leavebalance' && ledgerRows && ledgerRows.length > 0 && user?.role === 'employee') {
+      // Only save for employees (not admin/HR) and only on Leave Balance tab
+      console.log('✅ DEBUG - Conditions met! Auto-saving monthly records for employee on Leave Balance tab');
+      saveMonthlyLeaveRecords(ledgerRows);
+    } else {
+      console.log('❌ DEBUG - Conditions not met for saving monthly records:', {
+        isBalanceTab: selectedTab === 'leavebalance',
+        hasLedgerRows: ledgerRows && ledgerRows.length > 0,
+        isEmployee: user?.role === 'employee'
+      });
+    }
+  }, [selectedTab, ledgerRows, user?.role]); // Added selectedTab dependency
+
   return (
     <div className="space-y-6">
       {/* Toast Notifications */}
@@ -1167,7 +1332,7 @@ const LeaveManagement = () => {
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Leave Management</h1>
           <p className="text-gray-600 dark:text-gray-400">Manage leave requests and policies</p>
         </div>
-        {user?.role === 'employee' && (
+        {effectiveRole === 'employee' && (
           <Button onClick={() => setShowApplyForm(true)} className="flex items-center space-x-2">
             <Plus className="h-4 w-4" />
             <span>Apply Leave</span>
@@ -1197,7 +1362,7 @@ const LeaveManagement = () => {
       </div>
 
       {/* Leave Balance Tab (Employee only) */}
-      {selectedTab === 'leavebalance' && role === 'employee' && (
+      {selectedTab === 'leavebalance' && effectiveRole === 'employee' && (
         <div className="space-y-6">
           <Card>
             <CardHeader>
@@ -1414,8 +1579,8 @@ const LeaveManagement = () => {
                 className="border rounded px-3 py-2"
               >
                 <option value="public">Public</option>
-                <option value="restricted">Restricted</option>
-                <option value="optional">Optional</option>
+                {/* <option value="restricted">Restricted</option>
+                <option value="optional">Optional</option> */}
               </select>
               <button
                 type="submit"
@@ -1476,8 +1641,8 @@ const LeaveManagement = () => {
                             className="border rounded px-2 py-1"
                           >
                             <option value="public">Public</option>
-                            <option value="restricted">Restricted</option>
-                            <option value="optional">Optional</option>
+                            {/* <option value="restricted">Restricted</option>
+                            <option value="optional">Optional</option> */}
                           </select>
                         ) : (
                           h.type || 'public'
@@ -1528,57 +1693,103 @@ const LeaveManagement = () => {
       {/* Overview Tab */}
       {selectedTab === 'overview' && (
         <div className="space-y-6">
-          {/* Leave Balance Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {Object.entries(leaveBalance).map(([type, balance]) => (
-              <Card key={type}>
-                <CardContent className="pt-6">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-gray-600 dark:text-gray-400 capitalize">
-                        {balance.displayName || type} 
-                      </p>
-                      <p className="text-2xl font-bold text-gray-900 dark:text-white">
-                        {balance.remaining}
-                      </p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">
-                        of {balance.total} days
-                      </p>
+          {/* Leave Balance Cards - visible only for employees */}
+          {effectiveRole === 'employee' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              {Object.entries(leaveBalance).map(([type, balance]) => (
+                <Card key={type}>
+                  <CardContent className="pt-6">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-gray-600 dark:text-gray-400 capitalize">
+                          {balance.displayName || type} 
+                        </p>
+                        <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                          {balance.remaining}
+                        </p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          of {balance.total} days
+                        </p>
+                      </div>
+                      <div className="h-12 w-12 bg-blue-100 dark:bg-blue-900/20 rounded-full flex items-center justify-center">
+                        <Calendar className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+                      </div>
                     </div>
-                    <div className="h-12 w-12 bg-blue-100 dark:bg-blue-900/20 rounded-full flex items-center justify-center">
-                      <Calendar className="h-6 w-6 text-blue-600 dark:text-blue-400" />
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
 
           {/* Charts */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <LeaveTypesChart 
+            {/* <LeaveTypesChart 
               leaveData={leaveTypeData} 
               title="Leave Types Distribution"
               chartType="pie"
-            />
+            /> */}
 
             <Card>
               <CardHeader>
-                <CardTitle>Monthly Leave Trends</CardTitle>
-                <CardDescription>Leave requests over the past 6 months</CardDescription>
+                <CardTitle className="flex items-center justify-between">
+                  Monthly Leave Trends
+                  {monthlyTrendsLoading && (
+                    <div className="flex items-center text-sm text-muted-foreground">
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary mr-2"></div>
+                      Loading...
+                    </div>
+                  )}
+                </CardTitle>
+                <CardDescription>
+                  {monthlyTrendsError ? (
+                    <span className="text-red-500">⚠️ {monthlyTrendsError}</span>
+                  ) : (
+                    `Leave requests over the past 6 months (${monthlyLeaveData.length > 0 ? 
+                      `${monthlyLeaveData[0]?.month} - ${monthlyLeaveData[monthlyLeaveData.length - 1]?.month}` : 
+                      'Current + 5 previous months'})`
+                  )}
+                </CardDescription>
               </CardHeader>
               <CardContent>
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={monthlyLeaveData}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="month" />
-                    <YAxis />
-                    <Tooltip />
-                    <Bar dataKey="approved" fill="#10b981" name="Approved" />
-                    <Bar dataKey="pending" fill="#f59e0b" name="Pending" />
-                    <Bar dataKey="rejected" fill="#ef4444" name="Rejected" />
-                  </BarChart>
-                </ResponsiveContainer>
+                {monthlyTrendsLoading ? (
+                  <div className="flex items-center justify-center h-[300px]">
+                    <div className="text-center">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-2"></div>
+                      <p className="text-muted-foreground">Loading monthly trends...</p>
+                    </div>
+                  </div>
+                ) : monthlyTrendsError ? (
+                  <div className="flex items-center justify-center h-[300px]">
+                    <div className="text-center">
+                      <AlertCircle className="h-8 w-8 text-red-500 mx-auto mb-2" />
+                      <p className="text-red-500 mb-2">Failed to load trends</p>
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        onClick={fetchMonthlyTrends}
+                        className="text-xs"
+                      >
+                        Retry
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={monthlyLeaveData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="month" />
+                      <YAxis />
+                      <Tooltip 
+                        formatter={(value, name) => [value, name === 'approved' ? 'Total Leaves' : name]}
+                        labelFormatter={(label) => `Month: ${label}`}
+                      />
+                      <Bar dataKey="approved" fill="#10b981" name="Total Leaves" />
+                      {/* Hide pending/rejected for now since backend only returns total count */}
+                      {/* <Bar dataKey="pending" fill="#f59e0b" name="Pending" />
+                      <Bar dataKey="rejected" fill="#ef4444" name="Rejected" /> */}
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -1904,12 +2115,20 @@ const LeaveManagement = () => {
                     }}
                     value=""
                   >
-                    <option value="">Select employee to notify...</option>
-                    {employees.filter(emp => !isSelfEmployee(emp)).map(employee => (
-                      <option key={employee.id} value={employee.id}>
-                        {employee.name}
-                      </option>
-                    ))}
+                    <option value="">
+                      {!employees || employees.length === 0 
+                        ? "Loading employees..." 
+                        : "Select employee to notify..."}
+                    </option>
+                    {employees && employees.length > 0 ? (
+                      employees.filter(emp => !isSelfEmployee(emp)).map(employee => (
+                        <option key={employee.id} value={employee.id}>
+                          {employee.name} ({employee.employeeId})
+                        </option>
+                      ))
+                    ) : (
+                      <option value="" disabled>No employees available</option>
+                    )}
                   </select>
                 </div>
                 
@@ -1964,16 +2183,24 @@ const LeaveManagement = () => {
                     }}
                     value=""
                   >
-                    <option value="">Select additional employees to notify...</option>
-                    {employees.filter(emp => 
-                      !isSelfEmployee(emp) && 
-                      !leaveForm.toEmployees.find(to => to.id === emp.id) &&
-                      !leaveForm.ccEmployees.find(cc => cc.id === emp.id)
-                    ).map(employee => (
-                      <option key={employee.id} value={employee.id}>
-                        {employee.name}
-                      </option>
-                    ))}
+                    <option value="">
+                      {!employees || employees.length === 0 
+                        ? "Loading employees..." 
+                        : "Select additional employees to notify..."}
+                    </option>
+                    {employees && employees.length > 0 ? (
+                      employees.filter(emp => 
+                        !isSelfEmployee(emp) && 
+                        !leaveForm.toEmployees.find(to => to.id === emp.id) &&
+                        !leaveForm.ccEmployees.find(cc => cc.id === emp.id)
+                      ).map(employee => (
+                        <option key={employee.id} value={employee.id}>
+                          {employee.name} ({employee.employeeId})
+                        </option>
+                      ))
+                    ) : (
+                      <option value="" disabled>No employees available</option>
+                    )}
                   </select>
                 </div>
                 
@@ -2057,12 +2284,19 @@ const LeaveManagement = () => {
               <div>
                 <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Reason</label>
                 <textarea
-                  className="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-0 focus:border-2 focus:border-blue-500 resize-none"
+                  className={`w-full p-2 border rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-0 focus:border-2 resize-none ${
+                    formErrors.reason
+                      ? 'border-red-500 focus:border-red-500 dark:border-red-500'
+                      : 'border-gray-300 dark:border-gray-600 focus:border-blue-500'
+                  }`}
                   rows="3"
                   placeholder="Please provide a reason for your leave..."
                   value={leaveForm.reason}
                   onChange={(e) => setLeaveForm({...leaveForm, reason: e.target.value})}
                 ></textarea>
+                {formErrors.reason && (
+                  <p className="text-red-500 text-xs mt-1">{formErrors.reason}</p>
+                )}
               </div>
             </div>
             
@@ -2440,7 +2674,15 @@ const LeaveManagement = () => {
                   required
                 >
                   <option value="">Select Employee</option>
-                  {employees.map((emp) => (
+                  {employees
+                    .filter(emp => {
+                      const isActive = emp?.status === 'active';
+                      const deptRaw = emp?.department || emp?.Employee?.department || emp?.Department?.name;
+                      const dept = String(deptRaw || '').toLowerCase();
+                      const inTargetDepts = dept === 'hr' || dept === 'human resources' || dept === 'finance' || dept === 'engineering';
+                      return isActive && inTargetDepts;
+                    })
+                    .map((emp) => (
                     <option key={emp.id} value={emp.id}>
                       {emp.name} ({emp.employeeId}) - {emp.department}
                     </option>

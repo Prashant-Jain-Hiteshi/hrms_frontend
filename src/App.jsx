@@ -3,6 +3,8 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { ThemeProvider } from './contexts/ThemeContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { DataProvider } from './contexts/DataContext';
+import { ToastProvider } from './components/ui/Toast';
+import { NotificationProvider } from './socket/NotificationContext';
 import Login from './components/Login';
 import Layout from './components/Layout/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -31,6 +33,11 @@ const DashboardRouter = () => {
   return getDashboardComponent();
 };
 
+// Employee Dashboard Router (for HR users accessing employee portal)
+const EmployeeDashboardRouter = () => {
+  return <EmployeeDashboard />;
+};
+
 // Import Employee Management
 import EmployeeList from './components/Employees/EmployeeList';
 import AttendanceManagement from './components/Attendance/AttendanceManagement';
@@ -38,7 +45,9 @@ import LeaveManagement from './components/Leave/LeaveManagement';
 import PayrollManagement from './components/Payroll/PayrollManagement';
 import RecruitmentManagement from './components/Recruitment/RecruitmentManagement';
 import PerformanceManagement from './components/Performance/PerformanceManagement';
+import PerformanceEmployee from './components/Performance/PerformanceEmployee';
 import ExpenseManagement from './components/Expenses/ExpenseManagement';
+import EmployeeExpenseManagement from './components/Expenses/EmployeeExpenseManagement';
 import DocumentManagement from './components/Documents/DocumentManagement';
 import ReportsManagement from './components/Reports/ReportsManagement';
 import SettingsManagement from './components/Settings/SettingsManagement';
@@ -46,9 +55,11 @@ import SettingsManagement from './components/Settings/SettingsManagement';
 function App() {
   return (
     <ThemeProvider>
-      <AuthProvider>
-        <DataProvider>
-          <Router>
+      <ToastProvider>
+        <AuthProvider>
+          <NotificationProvider>
+            <DataProvider>
+              <Router>
           <div className="min-h-screen bg-background text-foreground">
             <Routes>
               <Route path="/login" element={<Login />} />
@@ -72,13 +83,24 @@ function App() {
                 <Route path="documents" element={<DocumentManagement />} />
                 <Route path="reports" element={<ReportsManagement />} />
                 <Route path="settings" element={<SettingsManagement />} />
+                
+                {/* Employee Portal Routes (for HR users to access employee view) */}
+                <Route path="employee/dashboard" element={<EmployeeDashboardRouter />} />
+                <Route path="employee/attendance" element={<AttendanceManagement />} />
+                <Route path="employee/leave" element={<LeaveManagement />} />
+                <Route path="employee/performance" element={<PerformanceEmployee />} />
+                <Route path="employee/expenses" element={<EmployeeExpenseManagement />} />
+                <Route path="employee/documents" element={<DocumentManagement />} />
+                
                 <Route path="test" element={<div className="p-6"><h1 className="text-2xl font-bold">Test Page</h1><p>This is a test page to verify routing works.</p></div>} />
               </Route>
             </Routes>
           </div>
-        </Router>
-        </DataProvider>
-      </AuthProvider>
+              </Router>
+            </DataProvider>
+          </NotificationProvider>
+        </AuthProvider>
+      </ToastProvider>
     </ThemeProvider>
   );
 }

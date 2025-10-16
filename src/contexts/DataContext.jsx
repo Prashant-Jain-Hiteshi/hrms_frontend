@@ -4,6 +4,7 @@ import { useAuth } from './AuthContext';
 import { EmployeesAPI, AttendanceAPI, PayrollAPI, DepartmentAPI } from '../lib/api';
 import { LeaveAPI as LeaveCreditAPI } from '../lib/api';
 import { LeaveAPI } from '../lib/leaveApi';
+import { PerformanceAPI } from '../lib/performanceApi';
 
 // Create the context
 const DataContext = createContext();
@@ -53,9 +54,21 @@ const DataProvider = ({ children }) => {
     try {
       setEmployeesLoading(true);
       setEmployeesError(null);
-      const response = await EmployeesAPI.list();
-      const employeeData = Array.isArray(response.data) ? response.data : 
-                          (response.data?.rows ? response.data.rows : []);
+      
+      // Try new paginated API first, fallback to old API
+      let response;
+      try {
+        response = await EmployeesAPI.listPaginated({ limit: 100 });
+      } catch (err) {
+        console.log('Paginated API failed, trying old API:', err.message);
+        response = await EmployeesAPI.list();
+      }
+      
+      // Handle both new and old response formats
+      const employeeData = response.data?.employees || // New format
+                          (Array.isArray(response.data) ? response.data : // Old format array
+                           (response.data?.rows ? response.data.rows : [])); // Old format with rows
+      
       setEmployees(employeeData);
       return employeeData;
     } catch (error) {
@@ -74,9 +87,17 @@ const DataProvider = ({ children }) => {
     try {
       setDepartmentsLoading(true);
       setDepartmentsError(null);
-      const response = await DepartmentAPI.list();
-      setDepartments(response.data);
-      return response.data;
+      
+      // 🚫 DISABLED: API call temporarily disabled - using mock data only
+      // const response = await DepartmentAPI.list();
+      // setDepartments(response.data);
+      // return response.data;
+      
+      // Always use mock departments (no API call)
+      console.log('📋 Using mock departments data (API disabled)');
+      setDepartments(MOCK_DEPARTMENTS);
+      return MOCK_DEPARTMENTS;
+      
     } catch (error) {
       console.error('Error fetching departments:', error);
       setDepartmentsError(error.message || 'Failed to fetch departments');
@@ -166,8 +187,18 @@ const DataProvider = ({ children }) => {
   
   // Fetch initial data when component mounts
   useEffect(() => {
+    // Skip data loading on authentication pages
+    const authPages = ['/login', '/otp', '/forgot-password'];
+    const currentPath = window.location.pathname;
+    
+    if (authPages.includes(currentPath)) {
+      console.log('🚫 Skipping bulk data loading on auth page:', currentPath);
+      return;
+    }
+    
     const loadInitialData = async () => {
       try {
+        console.log('🚀 Loading initial data for authenticated user...');
         // Load data independently to avoid one failure breaking others
         const promises = [
           fetchEmployees().catch(err => {
@@ -185,7 +216,7 @@ const DataProvider = ({ children }) => {
         ];
         
         await Promise.allSettled(promises);
-        console.log('Initial data loading completed');
+        console.log('✅ Initial data loading completed');
       } catch (error) {
         console.error('Error loading initial data:', error);
       }
@@ -372,11 +403,22 @@ const DataProvider = ({ children }) => {
 
   // Load employees and leave requests from backend on first mount
   useEffect(() => {
+    // Skip data loading on authentication pages
+    const authPages = ['/login', '/otp', '/forgot-password'];
+    const currentPath = window.location.pathname;
+    
+    if (authPages.includes(currentPath)) {
+      console.log('🚫 Skipping leave/employee data loading on auth page:', currentPath);
+      return;
+    }
+    
+    console.log('🚀 Loading leave and employee data...');
     fetchEmployees();
     fetchLeaveRequests();
     fetchLeaveTypes();
     fetchLeaveCreditConfigs();
     fetchPayrolls();
+    console.log('✅ Leave and employee data loading initiated');
   }, []);
 
 
@@ -408,6 +450,16 @@ const DataProvider = ({ children }) => {
   // Load my attendance, summary, and status on auth
   useEffect(() => {
     if (user) {
+      // Skip attendance data loading on authentication pages
+      const authPages = ['/login', '/otp', '/forgot-password'];
+      const currentPath = window.location.pathname;
+      
+      if (authPages.includes(currentPath)) {
+        console.log('🚫 Skipping attendance data loading on auth page:', currentPath);
+        return;
+      }
+      
+      console.log('👤 Loading user-specific attendance data...');
       const from = new Date();
       from.setDate(1);
       fetchMyAttendance({ from: from.toISOString().slice(0, 10) });
@@ -417,6 +469,7 @@ const DataProvider = ({ children }) => {
         const today = new Date().toISOString().slice(0, 10);
         fetchAllAttendance({ from: today, to: today });
       }
+      console.log('✅ User attendance data loading initiated');
     }
   }, [user]);
 
@@ -915,25 +968,49 @@ const DataProvider = ({ children }) => {
   };
 
   // Performance CRUD operations
-  const addGoal = (goalData) => {
-    const newGoal = {
-      ...goalData,
-      id: Date.now(),
-      progress: 0,
-      status: 'pending'
-    };
-    setGoals(prev => [...prev, newGoal]);
-    return newGoal;
+  const addGoal = async (goalData) => {
+    try {
+      console.log('🎯 DataContext: Creating performance goal via API');
+      const response = await PerformanceAPI.goals.create(goalData);
+      const newGoal = response.data;
+      
+      // Update local state for immediate UI feedback
+      setGoals(prev => [...prev, newGoal]);
+      return newGoal;
+    } catch (error) {
+      console.error('❌ DataContext: Failed to create performance goal:', error);
+      throw error;
+    }
   };
 
-  const updateGoal = (goalId, goalData) => {
-    setGoals(prev => prev.map(goal => 
-      goal.id === goalId ? { ...goal, ...goalData } : goal
-    ));
+  const updateGoal = async (goalId, goalData) => {
+    try {
+      console.log('📝 DataContext: Updating performance goal via API');
+      const response = await PerformanceAPI.goals.update(goalId, goalData);
+      const updatedGoal = response.data;
+      
+      // Update local state
+      setGoals(prev => prev.map(goal => 
+        goal.id === goalId ? updatedGoal : goal
+      ));
+      return updatedGoal;
+    } catch (error) {
+      console.error('❌ DataContext: Failed to update performance goal:', error);
+      throw error;
+    }
   };
 
-  const deleteGoal = (goalId) => {
-    setGoals(prev => prev.filter(goal => goal.id !== goalId));
+  const deleteGoal = async (goalId) => {
+    try {
+      console.log('🗑️ DataContext: Deleting performance goal via API');
+      await PerformanceAPI.goals.delete(goalId);
+      
+      // Update local state
+      setGoals(prev => prev.filter(goal => goal.id !== goalId));
+    } catch (error) {
+      console.error('❌ DataContext: Failed to delete performance goal:', error);
+      throw error;
+    }
   };
 
   const addReview = (reviewData) => {

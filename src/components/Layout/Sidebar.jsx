@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { cn } from '../../lib/utils';
@@ -6,12 +6,13 @@ import Logo from '../ui/Logo';
 import {
   Building2, LayoutDashboard, Users, Clock, Calendar, DollarSign,
   UserPlus, TrendingUp, BookOpen, Receipt, FileText, Bell,
-  Settings, LogOut, Menu, X
+  Settings, LogOut, Menu, X, ChevronDown, ChevronRight, User
 } from 'lucide-react';
 
 const Sidebar = ({ isOpen, setIsOpen }) => {
   const { user, logout, hasPermission } = useAuth();
   const navigate = useNavigate();
+  const [isEmployeePortalOpen, setIsEmployeePortalOpen] = useState(false);
 
   const handleLogout = () => {
     logout();
@@ -58,14 +59,14 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
     {
       title: 'Performance',
       icon: TrendingUp,
-      path: '/performance',
-      permission: 'performance'
+      path: user?.role === 'employee' ? '/employee/performance' : '/performance',
+      permission: user?.role === 'employee' ? null : 'performance'
     },
     {
       title: 'Expenses',
       icon: Receipt,
-      path: '/expenses',
-      permission: 'expenses'
+      path: user?.role === 'employee' ? '/employee/expenses' : '/expenses',
+      permission: null // Allow all users to see expenses
     },
     {
       title: 'Documents',
@@ -73,17 +74,68 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
       path: '/documents',
       permission: 'documents'
     },
+    // {
+    //   title: 'Reports',
+    //   icon: FileText,
+    //   path: '/reports',
+    //   permission: 'reports'
+    // }
+  ];
+
+  const filteredMenuItems = menuItems.filter(item => {
+    // Hide Performance tab for finance role users
+    if (item.title === 'Performance' && user?.role === 'Finance') {
+      return false;
+    }
+    
+    // Apply existing permission checks
+    return !item.permission || hasPermission(item.permission) || hasPermission('all');
+  });
+
+  const employeePortalItems = [
     {
-      title: 'Reports',
+      title: 'Dashboard',
+      icon: LayoutDashboard,
+      path: '/employee/dashboard',
+      description: 'Employee overview'
+    },
+    {
+      title: 'Attendance',
+      icon: Clock,
+      path: '/employee/attendance',
+      description: 'My attendance records'
+    },
+    {
+      title: 'Leave Management',
+      icon: Calendar,
+      path: '/employee/leave',
+      description: 'My leave requests'
+    },
+    // {
+    //   title: 'Performance',
+    //   icon: TrendingUp,
+    //   path: '/employee/performance',
+    //   description: 'My performance goals and feedback'
+    // },
+    {
+      title: 'Expenses',
+      icon: Receipt,
+      path: '/employee/expenses',
+      description: 'My expense reimbursements'
+    },
+    {
+      title: 'Documents',
       icon: FileText,
-      path: '/reports',
-      permission: 'reports'
+      path: '/employee/documents',
+      description: 'My personal documents'
     }
   ];
 
-  const filteredMenuItems = menuItems.filter(item => 
-    !item.permission || hasPermission(item.permission) || hasPermission('all')
-  );
+  // Check if user is HR or Finance (should have both management and employee access)
+  // Admin users only get management access, not employee portal
+  // Regular employees get direct access, no portal needed
+  const canAccessEmployeePortal = user?.role === 'hr' || user?.role === 'finance';
+
 
   return (
     <>
@@ -135,41 +187,95 @@ const Sidebar = ({ isOpen, setIsOpen }) => {
 
           {/* Navigation */}
           <nav className="flex-1 overflow-y-auto p-4">
-            <ul className="space-y-2">
-              {filteredMenuItems.map((item) => {
-                const Icon = item.icon;
-                return (
-                  <li key={item.path}>
-                    <NavLink
-                      to={item.path}
-                      className={({ isActive }) => cn(
-                        "flex items-center space-x-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
-                        isActive
-                          ? "bg-white/20 text-white"
-                          : "text-white/80 hover:bg-white/10 hover:text-white"
-                      )}
-                      onClick={() => setIsOpen(false)}
-                    >
-                      <Icon className="h-5 w-5 flex-shrink-0" />
-                      <span>{item.title}</span>
-                    </NavLink>
-                  </li>
-                );
-              })}
-            </ul>
+            <div className="space-y-4">
+              {/* HR Management Section */}
+              <div>
+                {/* <h3 className="text-xs font-semibold text-white/60 uppercase tracking-wider mb-2 px-3">
+                  HR Management
+                </h3> */}
+                <ul className="space-y-2">
+                  {filteredMenuItems.map((item) => {
+                    const Icon = item.icon;
+                    return (
+                      <li key={item.path}>
+                        <NavLink
+                          to={item.path}
+                          className={({ isActive }) => cn(
+                            "flex items-center space-x-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
+                            isActive
+                              ? "bg-white/20 text-white"
+                              : "text-white/80 hover:bg-white/10 hover:text-white"
+                          )}
+                          onClick={() => setIsOpen(false)}
+                        >
+                          <Icon className="h-5 w-5 flex-shrink-0" />
+                          <span>{item.title}</span>
+                        </NavLink>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+
+              {/* Employee Portal Section (only for HR and Finance users) */}
+              {canAccessEmployeePortal && (
+                <div>
+                  <button
+                    onClick={() => setIsEmployeePortalOpen(!isEmployeePortalOpen)}
+                    className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-white/60 uppercase tracking-wider hover:text-white/80 transition-colors"
+                  >
+                    <div className="flex items-center space-x-2">
+                      <User className="h-4 w-4" />
+                      <span>My Employee Portal</span>
+                    </div>
+                    {isEmployeePortalOpen ? (
+                      <ChevronDown className="h-4 w-4" />
+                    ) : (
+                      <ChevronRight className="h-4 w-4" />
+                    )}
+                  </button>
+                  
+                  {isEmployeePortalOpen && (
+                    <ul className="space-y-2 mt-2 ml-2">
+                      {employeePortalItems.map((item) => {
+                        const Icon = item.icon;
+                        return (
+                          <li key={item.path}>
+                            <NavLink
+                              to={item.path}
+                              className={({ isActive }) => cn(
+                                "flex items-center space-x-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors border-l-2 border-white/20",
+                                isActive
+                                  ? "bg-white/20 text-white border-white"
+                                  : "text-white/70 hover:bg-white/10 hover:text-white hover:border-white/40"
+                              )}
+                              onClick={() => setIsOpen(false)}
+                              title={item.description}
+                            >
+                              <Icon className="h-4 w-4 flex-shrink-0" />
+                              <span>{item.title}</span>
+                            </NavLink>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </div>
           </nav>
 
           {/* Footer */}
           <div className="p-4 border-t border-white/20">
             <div className="space-y-2">
-              <NavLink
+              {/* <NavLink
                 to="/settings"
                 className="flex items-center space-x-3 px-3 py-2 rounded-lg text-sm font-medium text-white/80 hover:bg-white/10 hover:text-white transition-colors"
                 onClick={() => setIsOpen(false)}
               >
                 <Settings className="h-5 w-5" />
                 <span>Settings</span>
-              </NavLink>
+              </NavLink> */}
               <button
                 onClick={handleLogout}
                 className="flex items-center space-x-3 px-3 py-2 rounded-lg text-sm font-medium text-red-300 hover:bg-red-500/20 hover:text-red-200 transition-colors w-full text-left"
